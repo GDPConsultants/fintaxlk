@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Primary Meta -->
+    <title>FinTax LK — Personal Finance & Tax Management</title>
+    <meta name="description" content="Sri Lanka's personal finance and income tax management app. IIT computation for salaried employees and freelancers. 2025/2026 assessment year. By GDP Consultants — Chartered Accountants." />
+    <meta name="keywords" content="Sri Lanka tax, income tax, IRD, IIT, personal finance, freelancer tax, FinTax LK, GDP Consultants" />
+    <meta name="author" content="GDP Consultants — Chartered Accountants" />
+    <meta name="application-name" content="FinTax LK" />
+
+    <!-- PWA / Theme -->
+    <meta name="theme-color" content="#B8960C" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FinTax LK" />
+    <meta name="msapplication-TileColor" content="#0D1829" />
+    <meta name="msapplication-TileImage" content="android/mipmap-xxhdpi/ic_launcher.png" />
+
+    <!-- Web App Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Apple Touch Icon (180x180 — used for iOS home screen) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="ios/180.png" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="android/mipmap-mdpi/ic_launcher.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="android/mipmap-mdpi/ic_launcher.png" />
+    <link rel="shortcut icon" href="android/mipmap-mdpi/ic_launcher.png" />
+
+    <!-- Open Graph (for WhatsApp / social sharing previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="FinTax LK — Personal Finance & Tax Management" />
+    <meta property="og:description" content="Manage your money and Sri Lanka income tax in one app. 30-day free trial. By GDP Consultants." />
+    <meta property="og:image" content="android/playstore-icon.png" />
+    <meta property="og:url" content="https://fintaxlk.netlify.app" />
+    <meta property="og:site_name" content="FinTax LK" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="FinTax LK" />
+    <meta name="twitter:description" content="Sri Lanka personal finance & tax management app." />
+    <meta name="twitter:image" content="android/playstore-icon.png" />
+
+    <!-- Preconnect for performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+
+    <style>
+      /* Prevent flash of unstyled content — match app background */
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        background-color: #0D1829;
+        min-height: 100%;
+        font-family: Arial, sans-serif;
+      }
+
+      /* Loading splash shown before React mounts */
+      #app-loader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100dvh;
+        background: linear-gradient(160deg, #060d1a, #0a0a00);
+        color: #B8860C;
+      }
+      #app-loader .loader-logo {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        border: 2px solid #B8860C;
+        margin-bottom: 16px;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      #app-loader p {
+        font-size: 14px;
+        color: #64748b;
+        margin: 0;
+        letter-spacing: 0.5px;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.4; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- React mounts here -->
+    <div id="root">
+      <!-- Fallback loader shown until React hydrates -->
+      <div id="app-loader">
+        <img
+          class="loader-logo"
+          src="android/mipmap-xxxhdpi/ic_launcher.png"
+          alt="FinTax LK"
+          onerror="this.style.display='none'"
+        />
+        <p>FinTax LK — Loading...</p>
+      </div>
+    </div>
+
+    <!-- Service Worker registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {
+            // sw.js is optional — silently ignore if not present
+          });
+        });
+      }
+    </script>
+
+    <!-- React entry point (Vite) -->
+    <script type="module" src="src/main.jsx"></script>
+  </body>
+</html>

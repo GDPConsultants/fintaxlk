@@ -1,0 +1,92 @@
+{
+  "name": "FinTax LK",
+  "short_name": "FinTax LK",
+  "description": "Personal Finance & Tax Management for Sri Lanka — Salaried & Freelancer IIT computation, unified cash/bank ledger, IRD compliance. By GDP Consultants.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0D1829",
+  "theme_color": "#B8860C",
+  "orientation": "any",
+  "lang": "en",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "android/mipmap-mdpi/ic_launcher.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "android/mipmap-hdpi/ic_launcher.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "android/mipmap-xhdpi/ic_launcher.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "android/mipmap-xxhdpi/ic_launcher.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "android/mipmap-xxxhdpi/ic_launcher.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "android/mipmap-xxxhdpi/ic_launcher_round.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "android/playstore-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "ios/180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "ios/1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/dashboard.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Dashboard — Total balance and tax summary"
+    },
+    {
+      "src": "screenshots/tax.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Tax computation — 2025/2026 IIT slabs"
+    }
+  ],
+  "prefer_related_applications": false,
+  "related_applications": [
+    {
+      "platform": "play",
+      "url": "https://play.google.com/store/apps/details?id=lk.taxcalculator.fintaxlk",
+      "id": "lk.taxcalculator.fintaxlk"
+    }
+  ]
+}
