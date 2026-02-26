@@ -4610,17 +4610,18 @@ function ToolsPage({data, update, sub, lang, tax, profile}) {
           📱 Upgrade via WhatsApp
         </a>
       </div>
-    </FinPage>
+    </div>
   );
 }
 
+// ─── Back Button (used in tools sub-pages) ──────────────────────────────────────
 function BackBtn({onClick}) {
   return(
     <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:100,pointerEvents:"none"}}>
       <button onClick={onClick} style={{margin:"8px 14px",padding:"6px 14px",background:"rgba(5,15,20,0.97)",border:`1px solid ${F.borderAccent}`,borderRadius:20,color:F.accentPrimary,fontSize:12,fontWeight:600,cursor:"pointer",pointerEvents:"all",backdropFilter:"blur(10px)"}}>
         ← Back to Financial Tools
       </button>
-    </FinPage>
+    </div>
   );
 }
 
