@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTax LK v13 — GitHub Publishing Guide</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;padding:0}
+  .hero{background:linear-gradient(135deg,#060d1a,#0f2040);padding:48px 24px;text-align:center;border-bottom:3px solid #b8960c}
+  .hero-title{font-size:32px;font-weight:900;color:#f5d060;margin-bottom:8px}
+  .hero-sub{font-size:14px;color:#94a3b8}
+  .hero-badge{display:inline-block;background:#b8960c;color:#000;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:800;margin-top:12px;letter-spacing:1px}
+  .container{max-width:860px;margin:0 auto;padding:32px 20px}
+  .toc{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:20px 24px;margin-bottom:36px}
+  .toc-title{font-size:14px;font-weight:800;color:#f5d060;margin-bottom:12px;letter-spacing:1px}
+  .toc a{display:block;color:#94a3b8;text-decoration:none;padding:5px 0;font-size:13px;border-bottom:1px solid #1e3a5f22}
+  .toc a:hover{color:#f5d060}
+  .toc a span{margin-right:8px}
+  h2{font-size:22px;font-weight:800;color:#f5d060;margin:40px 0 16px;padding-left:12px;border-left:4px solid #b8960c;display:flex;align-items:center;gap:10px}
+  h3{font-size:16px;font-weight:700;color:#e2e8f0;margin:24px 0 10px}
+  p{font-size:13px;color:#94a3b8;line-height:1.7;margin-bottom:12px}
+  .step-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:16px;position:relative}
+  .step-num{position:absolute;top:-12px;left:16px;background:#b8960c;color:#000;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900}
+  .step-title{font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:8px;padding-top:4px}
+  .step-body{font-size:13px;color:#94a3b8;line-height:1.7}
+  pre{background:#0a1628;border:1px solid #1e3a5f;border-radius:8px;padding:14px 16px;font-family:'Courier New',monospace;font-size:12px;color:#34d399;overflow-x:auto;margin:10px 0}
+  code{background:#0a1628;color:#34d399;padding:2px 6px;border-radius:4px;font-size:12px;font-family:'Courier New',monospace}
+  .file-tree{background:#060d1a;border:1px solid #1e3a5f;border-radius:10px;padding:16px 20px;font-family:'Courier New',monospace;font-size:12px;line-height:2;margin:12px 0}
+  .ft-folder{color:#f5d060;font-weight:700}
+  .ft-file{color:#94a3b8}
+  .ft-required{color:#34d399}
+  .ft-note{color:#475569;font-style:italic}
+  .badge-row{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+  .badge{padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700}
+  .badge-green{background:#064e3b;color:#34d399;border:1px solid #065f46}
+  .badge-gold{background:#451a03;color:#fbbf24;border:1px solid #78350f}
+  .badge-blue{background:#1e3a5f;color:#60a5fa;border:1px solid #1d4ed8}
+  .badge-red{background:#3f0909;color:#f87171;border:1px solid #7f1d1d}
+  .tip{background:#0a1f14;border:1px solid #065f46;border-radius:10px;padding:14px 16px;margin:12px 0;font-size:12px;color:#6ee7b7;line-height:1.6}
+  .warning{background:#1a0e00;border:1px solid #78350f;border-radius:10px;padding:14px 16px;margin:12px 0;font-size:12px;color:#fbbf24;line-height:1.6}
+  .info{background:#0c1a3a;border:1px solid #1d4ed8;border-radius:10px;padding:14px 16px;margin:12px 0;font-size:12px;color:#93c5fd;line-height:1.6}
+  .checklist{list-style:none;padding:0}
+  .checklist li{padding:7px 0;font-size:13px;color:#94a3b8;border-bottom:1px solid #1e293b;display:flex;align-items:flex-start;gap:8px}
+  .checklist li::before{content:"☐";color:#475569;flex-shrink:0;margin-top:1px}
+  .checklist li.done::before{content:"✅";color:#34d399}
+  .img-placeholder{background:#1e293b;border:2px dashed #334155;border-radius:10px;padding:32px;text-align:center;color:#475569;font-size:13px;margin:12px 0}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}
+  .col-card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px}
+  .col-card h4{font-size:13px;font-weight:700;color:#f5d060;margin-bottom:8px}
+  .col-card p{font-size:12px;color:#94a3b8;margin:0}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin:12px 0}
+  th{background:#0a1628;color:#f5d060;padding:10px 12px;text-align:left;font-weight:700;letter-spacing:0.5px}
+  td{padding:9px 12px;border-bottom:1px solid #1e293b;color:#94a3b8;vertical-align:top}
+  td:first-child{color:#e2e8f0;font-weight:600}
+  .divider{border:none;border-top:1px solid #1e293b;margin:40px 0}
+  @media(max-width:600px){.two-col{grid-template-columns:1fr}h2{font-size:18px}.hero-title{font-size:24px}}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-title">📤 FinTax LK v13</div>
+  <div class="hero-sub">Complete GitHub Publishing Guide</div>
+  <div class="hero-badge">GDP Consultants — Chartered Accountants</div>
+</div>
+
+<div class="container">
+
+  <!-- TABLE OF CONTENTS -->
+  <div class="toc">
+    <div class="toc-title">📋 TABLE OF CONTENTS</div>
+    <a href="#files"><span>📁</span> Section 1 — What's in this package</a>
+    <a href="#prereqs"><span>⚙️</span> Section 2 — Prerequisites (one-time setup)</a>
+    <a href="#github-create"><span>🐙</span> Section 3 — Create GitHub Repository</a>
+    <a href="#upload"><span>⬆️</span> Section 4 — Upload files to GitHub</a>
+    <a href="#pages"><span>🌐</span> Section 5 — Enable GitHub Pages (free hosting)</a>
+    <a href="#pwabuilder"><span>📲</span> Section 6 — Test with PWABuilder</a>
+    <a href="#cloudflare"><span>☁️</span> Section 7 — Connect Cloudflare Pages (optional)</a>
+    <a href="#verify"><span>✅</span> Section 8 — Final verification checklist</a>
+    <a href="#troubleshoot"><span>🔧</span> Section 9 — Troubleshooting</a>
+  </div>
+
+  <!-- SECTION 1: FILES -->
+  <h2 id="files">📁 What's in this package</h2>
+  <p>Unzip <code>fintaxlk-v13-github.zip</code> — you will find a folder called <strong>fintaxlk-github</strong> with these files. Upload <strong>all of them</strong> to GitHub exactly as they are.</p>
+
+  <div class="file-tree">
+    <div class="ft-folder">📁 fintaxlk-github/</div>
+    <div style="padding-left:20px">
+      <div class="ft-required">├── index.html &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← Main app (REQUIRED)</div>
+      <div class="ft-required">├── manifest.json &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← PWA manifest (REQUIRED)</div>
+      <div class="ft-required">├── sw.js &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← Service worker (REQUIRED)</div>
+      <div class="ft-file">├── 404.html &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← GitHub Pages routing fix</div>
+      <div class="ft-file">├── _redirects &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← Cloudflare Pages routing</div>
+      <div class="ft-file">├── _headers &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← Security headers</div>
+      <div class="ft-file">├── .gitignore &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← Git ignore rules</div>
+      <div class="ft-file">├── README.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← Project description</div>
+      <div class="ft-file">├── DEPLOY.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← Deployment notes</div>
+      <div class="ft-file">├── GITHUB-GUIDE.html &nbsp; ← This guide</div>
+      <div class="ft-folder">└── 📁 icons/</div>
+      <div style="padding-left:40px">
+        <div class="ft-required">├── icon-72.png</div>
+        <div class="ft-required">├── icon-96.png</div>
+        <div class="ft-required">├── icon-128.png</div>
+        <div class="ft-required">├── icon-144.png</div>
+        <div class="ft-required">├── icon-152.png</div>
+        <div class="ft-required">├── icon-192.png &nbsp;&nbsp; ← Apple touch icon</div>
+        <div class="ft-required">├── icon-384.png</div>
+        <div class="ft-required">├── icon-512.png &nbsp;&nbsp; ← Play Store icon</div>
+        <div class="ft-required">├── screenshot1.png &nbsp;← 1080×1920 mobile</div>
+        <div class="ft-required">└── screenshot2.png &nbsp;← 1280×800 desktop</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="badge-row">
+    <span class="badge badge-green">✅ 19 total files</span>
+    <span class="badge badge-gold">⚡ No build step needed</span>
+    <span class="badge badge-blue">📦 Ready to upload as-is</span>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 2: PREREQUISITES -->
+  <h2 id="prereqs">⚙️ Prerequisites</h2>
+  <p>You only need to do these once. If you already have a GitHub account, skip to Section 3.</p>
+
+  <div class="step-box">
+    <div class="step-num">1</div>
+    <div class="step-title">Create a free GitHub account</div>
+    <div class="step-body">
+      Go to <strong>github.com</strong> → click <strong>Sign up</strong><br>
+      Enter email, password, username → verify email → done.<br><br>
+      <strong>Recommended username:</strong> something like <code>gdpconsultants</code> or <code>taxcalculator-lk</code><br>
+      Your app URL will be: <code>https://YOUR-USERNAME.github.io/fintaxlk</code>
+    </div>
+  </div>
+
+  <div class="tip">
+    💡 <strong>Tip:</strong> Your GitHub username becomes part of the URL. If you plan to use a custom domain like <code>app.taxcalculator.lk</code>, the GitHub username doesn't matter much.
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 3: CREATE REPO -->
+  <h2 id="github-create">🐙 Create GitHub Repository</h2>
+
+  <div class="step-box">
+    <div class="step-num">1</div>
+    <div class="step-title">Go to GitHub and create a new repository</div>
+    <div class="step-body">
+      Log in to <strong>github.com</strong> → click the <strong>+</strong> button (top right) → <strong>New repository</strong>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">2</div>
+    <div class="step-title">Fill in repository details</div>
+    <div class="step-body">
+      <table>
+        <tr><th>Field</th><th>What to enter</th></tr>
+        <tr><td>Repository name</td><td><code>fintaxlk</code></td></tr>
+        <tr><td>Description</td><td><code>FinTax LK — Sri Lanka Personal Finance & Tax App</code></td></tr>
+        <tr><td>Visibility</td><td>✅ <strong>Public</strong> (required for free GitHub Pages)</td></tr>
+        <tr><td>Initialize with README</td><td>❌ Leave unchecked (we have our own README)</td></tr>
+        <tr><td>Add .gitignore</td><td>❌ Leave as None (we have our own)</td></tr>
+        <tr><td>License</td><td>None (or choose MIT if you want)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">3</div>
+    <div class="step-title">Click "Create repository"</div>
+    <div class="step-body">
+      You will see an empty repo page. Keep this tab open — you will need it in the next section.
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 4: UPLOAD -->
+  <h2 id="upload">⬆️ Upload Files to GitHub</h2>
+  <p>There are two ways to upload. <strong>Method A (drag & drop)</strong> is easiest — no technical skills needed.</p>
+
+  <h3>Method A — Drag & Drop (Recommended for beginners)</h3>
+
+  <div class="step-box">
+    <div class="step-num">1</div>
+    <div class="step-title">On your empty repository page, click "uploading an existing file"</div>
+    <div class="step-body">
+      You will see a link that says <em>"get started by creating a new file or uploading an existing file"</em><br>
+      Click <strong>"uploading an existing file"</strong>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">2</div>
+    <div class="step-title">Drag ALL files from the unzipped folder</div>
+    <div class="step-body">
+      Open the <strong>fintaxlk-github</strong> folder on your computer.<br><br>
+      ⚠️ <strong>Important:</strong> You need to upload the <strong>icons folder contents</strong> separately because GitHub drag & drop doesn't support nested folders directly.<br><br>
+      <strong>Step 2a:</strong> Drag these files from the root folder to the GitHub upload area:
+      <pre>index.html  manifest.json  sw.js  404.html
+_redirects  _headers  .gitignore  README.md  DEPLOY.md  GITHUB-GUIDE.html</pre>
+      Set commit message: <code>Add FinTax LK v13 app files</code><br>
+      Click <strong>Commit changes</strong>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">3</div>
+    <div class="step-title">Upload the icons folder</div>
+    <div class="step-body">
+      On your repo page, click <strong>Add file → Upload files</strong><br><br>
+      In the file input box, type <code>icons/</code> as a path prefix — <strong>OR</strong> use this trick:<br><br>
+      1. Click <strong>Add file → Create new file</strong><br>
+      2. In the filename box type: <code>icons/placeholder.txt</code> — this creates the icons folder<br>
+      3. Add any text, commit it<br>
+      4. Then navigate into the <strong>icons</strong> folder on GitHub<br>
+      5. Click <strong>Add file → Upload files</strong><br>
+      6. Drag all 10 PNG files from your <code>icons/</code> folder<br>
+      7. Commit message: <code>Add PWA icons and screenshots</code><br>
+      8. Click <strong>Commit changes</strong><br>
+      9. Delete the placeholder.txt file if you created one
+    </div>
+  </div>
+
+  <div class="tip">
+    💡 <strong>Easier icon upload trick:</strong> On the upload page, you can drag the entire <code>icons</code> folder directly into the browser upload area in Chrome — it will upload all files inside it automatically, preserving the folder structure.
+  </div>
+
+  <h3>Method B — Git command line (faster for future updates)</h3>
+
+  <div class="step-box">
+    <div class="step-num">1</div>
+    <div class="step-title">Install Git (if not installed)</div>
+    <div class="step-body">
+      Download from <strong>git-scm.com</strong> → install with defaults → restart terminal
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">2</div>
+    <div class="step-title">Open terminal / command prompt in the fintaxlk-github folder</div>
+    <div class="step-body">
+      <strong>Windows:</strong> Right-click inside the folder → "Open in Terminal" or "Git Bash here"<br>
+      <strong>Mac:</strong> Right-click folder → Services → New Terminal at Folder
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">3</div>
+    <div class="step-title">Run these commands one by one</div>
+    <div class="step-body">
+      Replace <code>YOUR-USERNAME</code> with your GitHub username:
+      <pre>git init
+git add .
+git commit -m "FinTax LK v13 — initial release"
+git branch -M main
+git remote add origin https://github.com/YOUR-USERNAME/fintaxlk.git
+git push -u origin main</pre>
+      GitHub will ask for your username and password (use a Personal Access Token as the password — see github.com/settings/tokens)
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 5: GITHUB PAGES -->
+  <h2 id="pages">🌐 Enable GitHub Pages (Free Hosting)</h2>
+  <p>GitHub Pages hosts your app for free at <code>https://YOUR-USERNAME.github.io/fintaxlk</code></p>
+
+  <div class="step-box">
+    <div class="step-num">1</div>
+    <div class="step-title">Go to your repository Settings</div>
+    <div class="step-body">
+      On your GitHub repo page → click the <strong>Settings</strong> tab (gear icon, top row)
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">2</div>
+    <div class="step-title">Find the Pages section</div>
+    <div class="step-body">
+      In the left sidebar → scroll down to → <strong>Pages</strong> (under "Code and automation")
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">3</div>
+    <div class="step-title">Configure source</div>
+    <div class="step-body">
+      <table>
+        <tr><th>Setting</th><th>Value</th></tr>
+        <tr><td>Source</td><td>Deploy from a branch</td></tr>
+        <tr><td>Branch</td><td>main</td></tr>
+        <tr><td>Folder</td><td>/ (root)</td></tr>
+      </table>
+      Click <strong>Save</strong>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">4</div>
+    <div class="step-title">Wait 2–5 minutes, then visit your app</div>
+    <div class="step-body">
+      GitHub will show a green banner: <em>"Your site is live at https://YOUR-USERNAME.github.io/fintaxlk"</em><br><br>
+      Open the URL in your phone browser — you should see the FinTax LK loading screen.
+    </div>
+  </div>
+
+  <div class="warning">
+    ⚠️ <strong>Important:</strong> GitHub Pages URL includes the repo name in the path (e.g. <code>/fintaxlk/</code>). The app's <code>start_url: "/"</code> in manifest.json means the service worker may behave differently. For best results, use Cloudflare Pages (Section 7) which serves from the domain root.
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 6: PWABUILDER -->
+  <h2 id="pwabuilder">📲 Test with PWABuilder</h2>
+  <p>After your app is live, test it on PWABuilder to check scores and generate the Play Store package.</p>
+
+  <div class="step-box">
+    <div class="step-num">1</div>
+    <div class="step-title">Go to PWABuilder</div>
+    <div class="step-body">
+      Open <strong>pwabuilder.com</strong> in your browser
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">2</div>
+    <div class="step-title">Enter your live URL</div>
+    <div class="step-body">
+      Type your app URL — use the Cloudflare URL for best results:<br>
+      <pre>https://fintaxlk.pages.dev</pre>
+      Or your GitHub Pages URL:<br>
+      <pre>https://YOUR-USERNAME.github.io/fintaxlk</pre>
+      Click <strong>Start</strong>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">3</div>
+    <div class="step-title">Check your scores — expected results</div>
+    <div class="step-body">
+      <table>
+        <tr><th>Check</th><th>Expected</th></tr>
+        <tr><td>Web App Manifest</td><td>✅ Valid manifest found</td></tr>
+        <tr><td>Service Worker</td><td>✅ Service worker registered</td></tr>
+        <tr><td>Security (HTTPS)</td><td>✅ Served over HTTPS</td></tr>
+        <tr><td>512×512 icon</td><td>✅ Found</td></tr>
+        <tr><td>Maskable icon</td><td>✅ Found</td></tr>
+        <tr><td>Screenshots</td><td>✅ 2 screenshots (mobile + desktop)</td></tr>
+        <tr><td>Overall score</td><td>🟢 Green / Package for stores enabled</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">4</div>
+    <div class="step-title">Package for Android Play Store</div>
+    <div class="step-body">
+      Click <strong>Package for Stores</strong> → <strong>Android</strong><br><br>
+      Fill in these settings:
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>App name</td><td>FinTax LK</td></tr>
+        <tr><td>Package ID</td><td><code>lk.taxcalculator.fintax</code></td></tr>
+        <tr><td>App version</td><td><code>1.3.0</code></td></tr>
+        <tr><td>Version code</td><td><code>13</code></td></tr>
+        <tr><td>Signing key</td><td>Generate new (SAVE THE PASSWORD!)</td></tr>
+      </table>
+      Click <strong>Generate</strong> → download the zip → extract → find the <code>.aab</code> file<br><br>
+      Upload the <code>.aab</code> to <strong>play.google.com/console</strong>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 7: CLOUDFLARE -->
+  <h2 id="cloudflare">☁️ Connect Cloudflare Pages (Recommended)</h2>
+  <p>Cloudflare Pages is faster than GitHub Pages (global CDN), supports custom domains easily, and handles the <code>_redirects</code> and <code>_headers</code> files automatically.</p>
+
+  <div class="step-box">
+    <div class="step-num">1</div>
+    <div class="step-title">Create a free Cloudflare account</div>
+    <div class="step-body">
+      Go to <strong>cloudflare.com</strong> → Sign up for free
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">2</div>
+    <div class="step-title">Go to Pages</div>
+    <div class="step-body">
+      In Cloudflare dashboard → left sidebar → <strong>Workers & Pages</strong> → <strong>Pages</strong> → <strong>Create a project</strong>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">3</div>
+    <div class="step-title">Connect to Git</div>
+    <div class="step-body">
+      Click <strong>Connect to Git</strong> → authorize GitHub → select your <code>fintaxlk</code> repository
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">4</div>
+    <div class="step-title">Configure build settings</div>
+    <div class="step-body">
+      <table>
+        <tr><th>Setting</th><th>Value</th></tr>
+        <tr><td>Project name</td><td>fintaxlk</td></tr>
+        <tr><td>Production branch</td><td>main</td></tr>
+        <tr><td>Framework preset</td><td>None</td></tr>
+        <tr><td>Build command</td><td><em>(leave empty)</em></td></tr>
+        <tr><td>Build output directory</td><td><code>/</code></td></tr>
+        <tr><td>Root directory</td><td><code>/</code></td></tr>
+      </table>
+      Click <strong>Save and Deploy</strong>
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">5</div>
+    <div class="step-title">Your app is live!</div>
+    <div class="step-body">
+      After ~60 seconds, your app will be at: <code>https://fintaxlk.pages.dev</code><br><br>
+      Every time you push to GitHub → Cloudflare automatically redeploys.
+    </div>
+  </div>
+
+  <div class="step-box">
+    <div class="step-num">6</div>
+    <div class="step-title">Add custom domain (optional)</div>
+    <div class="step-body">
+      In your Cloudflare Pages project → <strong>Custom domains</strong> → <strong>Set up a custom domain</strong><br>
+      Enter: <code>app.taxcalculator.lk</code><br>
+      Cloudflare will show you a CNAME record to add to your DNS.<br><br>
+      If your domain is also on Cloudflare → it happens automatically in seconds.<br>
+      If hosted elsewhere → add the CNAME record in your domain registrar's DNS settings.
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 8: VERIFY -->
+  <h2 id="verify">✅ Final Verification Checklist</h2>
+  <p>Run through this checklist after deployment to confirm everything works.</p>
+
+  <ul class="checklist">
+    <li>App loads at your live URL (GitHub Pages or Cloudflare Pages)</li>
+    <li>App loads on mobile (open URL on your Android/iPhone)</li>
+    <li>"Add to Home Screen" prompt appears on Android Chrome</li>
+    <li>App icon appears correctly after installing to home screen</li>
+    <li>App opens in standalone mode (no browser address bar)</li>
+    <li>All 9 tabs load: Dashboard, Tax Year, Income Sources, Tax Report, Cash Book, Cash Book Report, AI Tools, Our Services, Help</li>
+    <li>Tax Report download button works (downloads .html file)</li>
+    <li>Cash Book Report download works (downloads .html file)</li>
+    <li>Google Drive backup button shows sign-in prompt</li>
+    <li>PWABuilder shows all green scores at pwabuilder.com</li>
+    <li>Lighthouse PWA score is 90+ (Chrome DevTools → Lighthouse tab)</li>
+    <li>App works offline after first load (airplane mode test)</li>
+  </ul>
+
+  <hr class="divider">
+
+  <!-- SECTION 9: TROUBLESHOOT -->
+  <h2 id="troubleshoot">🔧 Troubleshooting</h2>
+
+  <h3>❌ "This content is blocked" when downloading reports</h3>
+  <p>This is a CSP (Content Security Policy) issue. Make sure the <code>_headers</code> file is uploaded and does NOT contain <code>X-Frame-Options: SAMEORIGIN</code>. The current version has this fixed.</p>
+
+  <h3>❌ Service worker not registering</h3>
+  <p>The service worker only works on HTTPS. GitHub Pages and Cloudflare Pages both provide HTTPS automatically. If testing locally, use <code>localhost</code> (not a local IP address).</p>
+
+  <h3>❌ PWABuilder shows "No manifest found"</h3>
+  <p>Make sure <code>manifest.json</code> is in the root of your repository (not inside a subfolder). Also check that your <code>index.html</code> has this line in the <code>&lt;head&gt;</code>:</p>
+  <pre>&lt;link rel="manifest" href="/manifest.json"&gt;</pre>
+
+  <h3>❌ Icons not showing on Play Store</h3>
+  <p>PWABuilder requires a 512×512 icon with <code>"purpose": "maskable"</code>. This is already included in the <code>manifest.json</code> pointing to <code>icon-512.png</code>.</p>
+
+  <h3>❌ App shows 404 on GitHub Pages when refreshing</h3>
+  <p>This is normal for SPAs on GitHub Pages. The <code>404.html</code> file included in this package handles this — it redirects back to <code>index.html</code>.</p>
+
+  <h3>❌ Google Drive backup not working</h3>
+  <p>You need to add your live domain to the Google Cloud Console OAuth2 client's "Authorized JavaScript Origins". Go to <strong>console.cloud.google.com</strong> → APIs & Services → Credentials → your OAuth2 client → add your domain.</p>
+
+  <hr class="divider">
+
+  <!-- CONTACT -->
+  <div style="background:#0a1628;border:1px solid #1e3a5f;border-radius:14px;padding:24px;text-align:center;margin-top:20px">
+    <div style="font-size:18px;font-weight:800;color:#f5d060;margin-bottom:8px">GDP Consultants</div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:16px">Chartered Accountants — Sri Lanka</div>
+    <div class="badge-row" style="justify-content:center">
+      <span class="badge badge-green">📧 gdpconsultants2020@gmail.com</span>
+      <span class="badge badge-gold">💬 WhatsApp: +94 76 195 0117</span>
+      <span class="badge badge-blue">🌐 www.taxcalculator.lk</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
