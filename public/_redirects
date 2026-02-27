@@ -1,0 +1,7 @@
+# SPA fallback — Cloudflare Pages
+# Static files served directly; everything else → index.html
+/sw.js           /sw.js           200
+/manifest.json   /manifest.json   200
+/favicon.ico     /favicon.ico     200
+/registerSW.js   /registerSW.js   200
+/workbox-*.js    /workbox-:hash.js 200

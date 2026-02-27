@@ -1,0 +1,74 @@
+{
+  "name": "FinTax LK — Tax & Finance Manager",
+  "short_name": "FinTax LK",
+  "description": "Sri Lanka personal & company tax management, APIT calculator, cash book, income tracking and professional CA services by GDP Consultants — Chartered Accountants.",
+  "start_url": "/",
+  "scope": "/",
+  "id": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "portrait-primary",
+  "background_color": "#060d1a",
+  "theme_color": "#b8960c",
+  "lang": "en-LK",
+  "dir": "ltr",
+  "categories": ["finance", "productivity", "business"],
+  "iarc_rating_id": "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7",
+
+  "icons": [
+    { "src": "/icons/icon-48.png",            "sizes": "48x48",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-72.png",            "sizes": "72x72",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-96.png",            "sizes": "96x96",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-128.png",           "sizes": "128x128", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-144.png",           "sizes": "144x144", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-152.png",           "sizes": "152x152", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192.png",           "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-384.png",           "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png",           "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192-maskable.png",  "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-512-maskable.png",  "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+
+  "screenshots": [
+    {
+      "src": "/icons/screenshot-mobile.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "FinTax LK — Tax summary, cash book and income tracking"
+    },
+    {
+      "src": "/icons/screenshot-wide.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "FinTax LK — Finance & Tax Dashboard"
+    }
+  ],
+
+  "shortcuts": [
+    { "name": "Tax Summary",    "short_name": "Tax",    "description": "IIT tax calculation 2025/2026", "url": "/?tab=tax",    "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Cash Book",      "short_name": "Book",   "description": "Record and view transactions",  "url": "/?tab=book",   "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Income Sources", "short_name": "Income", "description": "Manage income entries",         "url": "/?tab=income", "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }] },
+    { "name": "APIT Calc",      "short_name": "APIT",   "description": "Monthly APIT deduction",       "url": "/?tab=tools",  "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }] }
+  ],
+
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+
+  "handle_links": "preferred",
+
+  "launch_handler": {
+    "client_mode": ["navigate-existing", "auto"]
+  },
+
+  "prefer_related_applications": false,
+  "related_applications": []
+}
