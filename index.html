@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en-LK" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- ── Primary Meta ─────────────────────────────────────────── -->
+    <title>FinTax LK — Tax & Finance Manager</title>
+    <meta name="description" content="Sri Lanka personal & company tax management, APIT calculator, cash book, income tracking and professional CA services by GDP Consultants — Chartered Accountants." />
+    <meta name="author" content="GDP Consultants — Chartered Accountants" />
+    <meta name="keywords" content="Sri Lanka tax, APIT calculator, income tax 2025, IRD, GDP Consultants, cash book, personal finance" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- ── PWA / Theme ───────────────────────────────────────────── -->
+    <meta name="theme-color" content="#b8960c" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="FinTax LK" />
+
+    <!-- ── Apple / iOS ──────────────────────────────────────────── -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FinTax LK" />
+
+    <!-- ── Microsoft / Windows ──────────────────────────────────── -->
+    <meta name="msapplication-TileColor" content="#b8960c" />
+    <meta name="msapplication-TileImage" content="/icons/icon-144.png" />
+    <meta name="msapplication-config" content="none" />
+
+    <!-- ── Web App Manifest ─────────────────────────────────────── -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- ── Icons ────────────────────────────────────────────────── -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/icons/icon-96.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
+
+    <!-- ── Apple Splash Screens (iOS standalone) ────────────────── -->
+    <link rel="apple-touch-startup-image" href="/icons/icon-512.png" />
+
+    <!-- ── Open Graph (WhatsApp / social previews) ──────────────── -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="FinTax LK — Tax & Finance Manager" />
+    <meta property="og:description" content="Sri Lanka personal & company tax management by GDP Consultants — Chartered Accountants." />
+    <meta property="og:image" content="/icons/icon-512.png" />
+    <meta property="og:url" content="https://fintaxlk.pages.dev/" />
+    <meta property="og:site_name" content="FinTax LK" />
+
+    <!-- ── Critical inline styles to prevent flash of unstyled content ── -->
+    <style>
+      html, body, #root {
+        margin: 0; padding: 0;
+        background: #060d1a;
+        min-height: 100vh;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-text-size-adjust: 100%;
+      }
+      /* Native-feel overscroll on mobile */
+      html { overscroll-behavior: none; }
+      body { overscroll-behavior-y: contain; }
+    </style>
+  </head>
+  <body>
+    <noscript>
+      <div style="text-align:center;padding:40px;background:#060d1a;color:#b8960c;font-family:sans-serif;">
+        <h2>FinTax LK requires JavaScript</h2>
+        <p>Please enable JavaScript to use this app.</p>
+      </div>
+    </noscript>
+
+    <!-- Pre-React loading screen — React removes this once it mounts -->
+    <div id="app-loading" style="
+      position:fixed;inset:0;
+      background:#060d1a;
+      display:flex;flex-direction:column;
+      align-items:center;justify-content:center;
+      font-family:sans-serif;
+      z-index:9999;
+    ">
+      <div style="font-size:48px;margin-bottom:16px;animation:spin 2s linear infinite">💰</div>
+      <div style="font-size:18px;font-weight:800;color:#f5d060;margin-bottom:8px">FinTax LK</div>
+      <div style="font-size:12px;color:#475569;margin-bottom:24px">GDP Consultants — Chartered Accountants</div>
+      <div style="
+        width:200px;height:3px;background:#0d1829;border-radius:99px;overflow:hidden;
+      ">
+        <div id="app-progress" style="
+          height:100%;width:0%;background:linear-gradient(90deg,#b8960c,#f5d060);
+          border-radius:99px;transition:width 0.3s;
+        "></div>
+      </div>
+      <div id="app-status" style="font-size:10px;color:#334155;margin-top:10px">Initialising…</div>
+    </div>
+
+    <style>
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+
+    <script>
+      // Animate the progress bar while JS loads
+      var _p = 10;
+      var _pi = setInterval(function() {
+        _p = Math.min(_p + Math.random() * 15, 85);
+        var el = document.getElementById('app-progress');
+        var st = document.getElementById('app-status');
+        if (el) el.style.width = _p + '%';
+        if (st && _p > 50) st.textContent = 'Loading modules…';
+      }, 200);
+      // Expose cleanup for React to call on mount
+      window.__hideAppLoading = function() {
+        clearInterval(_pi);
+        var loader = document.getElementById('app-loading');
+        if (loader) {
+          loader.style.transition = 'opacity 0.3s';
+          loader.style.opacity = '0';
+          setTimeout(function() { if (loader.parentNode) loader.parentNode.removeChild(loader); }, 350);
+        }
+      };
+    </script>
+
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
