@@ -3909,7 +3909,7 @@ function EPFPlannerPage({data, update, sub, lang}) {
           </a>
         </>
       )}
-    </div>
+    </FinPage>
   );
 }
 
@@ -4052,7 +4052,7 @@ function NetWorthPage({data, update}) {
         <div style={{fontSize:13,fontWeight:700,color:F.accentGold}}>📅 Book a Wealth Planning Consultation</div>
         <div style={{fontSize:10,color:"#92400e",marginTop:2}}>GDP Consultants — Chartered Accountants</div>
       </a>
-    </div>
+    </FinPage>
   );
 }
 
@@ -5796,7 +5796,7 @@ function ToolsPage({data, update, sub, lang, tax, profile}) {
           📱 Upgrade via WhatsApp
         </a>
       </div>
-    </FinPage>
+    </div>
   );
 }
 
@@ -5806,7 +5806,7 @@ function BackBtn({onClick}) {
       <button onClick={onClick} style={{margin:"8px 14px",padding:"6px 14px",background:"rgba(5,15,20,0.97)",border:`1px solid ${F.borderAccent}`,borderRadius:20,color:F.accentPrimary,fontSize:12,fontWeight:600,cursor:"pointer",pointerEvents:"all",backdropFilter:"blur(10px)"}}>
         ← Back to Financial Tools
       </button>
-    </FinPage>
+    </div>
   );
 }
 
