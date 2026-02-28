@@ -1,0 +1,15 @@
+/* FinTax LK — App Component Styles */
+/* The main styling is handled inline within App.jsx using Tailwind-style
+   utility classes and inline style objects. This file is included for
+   compatibility and any future component-specific overrides. */
+
+/* Print styles — hide UI chrome when printing reports */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}
