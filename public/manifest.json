@@ -1,8 +1,8 @@
 {
-  "id": "com.gdpconsultants.fintaxlk",
-  "name": "FinTax LK",
+  "id": "app.taxcalculator.lk",
+  "name": "Tax and Personal Finance App Sri Lanka",
   "short_name": "FinTax",
-  "description": "Sri Lanka Personal Finance & Tax Management PWA by GDP Consultants",
+  "description": "FinTax LK is a powerful Sri Lanka–focused Personal Finance and Income Tax Management application developed by GDP Consultants. Designed specifically for individuals, professionals, and small business owners in Sri Lanka, FinTax LK helps you manage your income, calculate taxes accurately, and stay compliant with the latest Sri Lankan tax regulations — all in one secure and easy-to-use platform.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -41,7 +41,49 @@
       "src": "/icons/screenshot1.png",
       "sizes": "1080x1920",
       "type": "image/png",
-      "form_factor": "narrow"
+      "label": "Dashboard"
+    },
+    {
+      "src": "/icons/screenshot2.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Employment Type"
+    },
+    {
+      "src": "/icons/screenshot3.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Financial Tools"
+    },
+    {
+      "src": "/icons/screenshot4.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Tax Tools"
+    },
+    {
+      "src": "/icons/screenshot5.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Personal Details"
+    },
+    {
+      "src": "/icons/screenshot6.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Contact"
+    },
+    {
+      "src": "/icons/screenshot7.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Cash Book"
+    },
+    {
+      "src": "/icons/screenshot8.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "label": "Tax Profile"
     }
   ]
 }
