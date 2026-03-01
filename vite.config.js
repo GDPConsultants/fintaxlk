@@ -1,10 +1,5 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-
-// NOTE: vite-plugin-pwa is NOT used for service worker generation.
-// App.jsx registers /sw.js directly via navigator.serviceWorker.register('/sw.js').
-// public/sw.js  → served as-is by Cloudflare Pages (no Workbox injection needed).
-// public/manifest.json → served directly, no auto-generation required.
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [
@@ -15,6 +10,7 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     chunkSizeWarningLimit: 2000,
+
     rollupOptions: {
       output: {
         manualChunks: {
@@ -26,5 +22,10 @@ export default defineConfig({
 
   server: {
     port: 5173,
+    open: true,
   },
-});
+
+  preview: {
+    port: 4173,
+  },
+})
