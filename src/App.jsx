@@ -5094,9 +5094,9 @@ function APTICalculatorPage() {
   // Table 05 — Cumulative method (for mid-year starters / employer changers)
   // Derived from annual slabs + personal relief
   function calcT05(cumIncome, yr) {
-    let cfg = TAX_YEAR_CONFIG[yr || apitYear] || TAX_YEAR_CONFIG["2025/2026"];
-    let relief = cfg.personalRelief;
-    let slabs = cfg.slabs;
+    const cfg = TAX_YEAR_CONFIG[yr || apitYear] || TAX_YEAR_CONFIG["2025/2026"];
+    const relief = cfg.personalRelief;
+    const slabs = cfg.slabs;
     let taxable = Math.max(0, cumIncome - relief);
     let tax = 0;
     for (const s of slabs) {
