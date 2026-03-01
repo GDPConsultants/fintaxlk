@@ -5097,7 +5097,7 @@ function APTICalculatorPage() {
     const cfg = TAX_YEAR_CONFIG[yr || apitYear] || TAX_YEAR_CONFIG["2025/2026"];
     const relief = cfg.personalRelief;
     const slabs = cfg.slabs;
-    const taxable = Math.max(0, cumIncome - relief);
+    let taxable = Math.max(0, cumIncome - relief);
     let tax = 0;
     for (const s of slabs) {
       if (taxable <= 0) break;
