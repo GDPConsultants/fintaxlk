@@ -26,7 +26,26 @@ const DEFAULT_DATA_FACTORY = () => ({
   expenseEntries:[],
   bankAccounts:[],
   cashOpeningBalance:0,
-  taxSettings:{ qualifyingPayments:0, apitPaid:0, residency:"resident_citizen", slDays:"", assessmentYear:TAX_YEAR },
+  taxSettings:{
+    qualifyingPayments:0, apitPaid:0, residency:"resident_citizen", slDays:"", assessmentYear:TAX_YEAR,
+    // ── Rental Income Deduction (s.18 IRA) ──────────────────────────────────
+    rentalDeductionMethod:"standard",   // "standard" (25%) | "actual"
+    rentalActualExpenses:0,             // used only when method = "actual"
+    // ── Business Income — manual entry (all taxpayer types) ─────────────────
+    hasBusinessIncome:false,            // toggle to show business income section
+    businessGrossRevenue:0,             // Total gross business turnover for the year
+    businessAllowableExpenses:0,        // Total allowable expenses per accounts
+    disallowableExpenses:0,             // Add-back: entertainment >10%, private motor, excess depreciation
+    priorYearBusinessLoss:0,            // s.35 IRA — cumulative loss c/f (max 6 Y/A)
+    // ── WHT Credits — creditable against IIT (in addition to APIT) ──────────
+    whtDirectorsFees:0,                 // WHT 5% deducted at source — Director's Fees (s.83 IRA)
+    whtFreelance:0,                     // WHT 5% — Freelance/Contract/Consulting fees
+    whtRoyalties:0,                     // WHT 10% — Royalties (s.22 IRA)
+    whtRentalAIT:0,                     // AIT 10% — Rental (if payer is institution)
+    whtDividendAIT:0,                   // AIT 15% — Dividends (s.21 IRA)
+    whtInterestAIT:0,                   // AIT — FD Interest (5% pre-2025/26; 10% from 2025/26)
+    whtOther:0,                         // Any other WHT/AIT deducted at source
+  },
   customCatsIncome:[],
   customCatsExpense:[],
   // ── v9 NEW FEATURE DATA ──
@@ -60,8 +79,8 @@ const ALL_STORAGE_KEYS = [
 // ─── Multi-Language Translations ──────────────────────────────────────────────
 const TRANSLATIONS = {
   en:{
-    nav_dashboard:"Dashboard", nav_book:"Cash Book", nav_income:"Income Sources",
-    nav_tax:"Tax Year", nav_reports:"Tax Report", nav_help:"Help",
+    nav_dashboard:"Dashboard", nav_book:"Cash Book", nav_income:"Tax Return",
+    nav_reports:"Tax Report", nav_help:"Help",
     nav_cashreport:"CB Report",
     trial_ended:"Free Trial Ended", sub_expired:"Subscription Expired",
     trial_msg:"Your 30-day free trial has ended. Upgrade to continue.",
@@ -135,8 +154,8 @@ const TRANSLATIONS = {
     savings_none:"Great — you are maximising your current reliefs.",
   },
   si:{
-    nav_dashboard:"සාරාංශය", nav_book:"මුදල් ලේජරය", nav_income:"ආදායම් මූලාශ්‍ර",
-    nav_tax:"බදු වර්ෂය", nav_reports:"බදු වාර්තාව", nav_help:"උදව්",
+    nav_dashboard:"සාරාංශය", nav_book:"මුදල් ලේජරය", nav_income:"බදු ප්‍රතිලාභය",
+    nav_reports:"බදු වාර්තාව", nav_help:"උදව්",
     nav_cashreport:"CB වාර්තාව",
     trial_ended:"නිදහස් අත්හදා බැලීම අවසන් විය", sub_expired:"දායකත්වය කල් ඉකුත් විය",
     trial_msg:"ඔබගේ දින 30 නිදහස් අත්හදා බැලීම අවසන් විය. ඉදිරියට යාමට ගෙවන්න.",
@@ -188,8 +207,8 @@ const TRANSLATIONS = {
     savings_title:"💡 බදු ඉතිරි කිරීමේ ඉඟි",savings_none:"ප්‍රශස්ත! ඔබ දැනට සියලු සහනාශ ලබා ගනිමින් සිටී.",
   },
   ta:{
-    nav_dashboard:"டாஷ்போர்டு", nav_book:"பண ஏடு", nav_income:"வருமான மூலங்கள்",
-    nav_tax:"வரி ஆண்டு", nav_reports:"வரி அறிக்கை", nav_help:"உதவி",
+    nav_dashboard:"டாஷ்போர்டு", nav_book:"பண ஏடு", nav_income:"வரி தாக்கல்",
+    nav_reports:"வரி அறிக்கை", nav_help:"உதவி",
     nav_cashreport:"CB அறிக்கை",
     trial_ended:"இலவச சோதனை முடிந்தது", sub_expired:"சந்தா காலாவதியானது",
     trial_msg:"உங்கள் 30 நாள் இலவச சோதனை முடிந்தது. தொடர செலுத்தவும்.",
@@ -784,32 +803,67 @@ function computeTax(profile, incomeEntries, expenseEntries, taxSettings, activeY
   const relief       = isNRNC ? 0 : cfg.personalRelief;
   const qpRelief     = isNRNC ? 0 : Math.min(taxSettings?.qualifyingPayments||0, cfg.qpCap);
 
-  // Income totals by category
+  // ── Income totals by category (from ledger entries) ────────────────────────
   const incByCat = {};
   incomeEntries.forEach(e => { incByCat[e.category] = (incByCat[e.category]||0) + e.amount; });
-  const totalGross   = Object.values(incByCat).reduce((s,v)=>s+v,0);
-  // Export/Foreign income — 15% flat rate (includes legacy "Export/Foreign" category)
+  const totalGrossLedger = Object.values(incByCat).reduce((s,v)=>s+v,0);
+
+  // ── Manual Business Income entry (s.3 IRA) — any taxpayer type ─────────────
+  // Allows salaried employees with a side business AND freelancers using manual P&L
+  // Net business income = Gross Revenue − Allowable Expenses + Disallowable Add-backs − Prior Year Losses
+  const hasManualBusiness = !!(taxSettings?.hasBusinessIncome);
+  const bGross   = hasManualBusiness ? (taxSettings?.businessGrossRevenue||0)        : 0;
+  const bAllow   = hasManualBusiness ? (taxSettings?.businessAllowableExpenses||0)   : 0;
+  const bDisall  = hasManualBusiness ? (taxSettings?.disallowableExpenses||0)        : 0;
+  const bPrior   = hasManualBusiness ? (taxSettings?.priorYearBusinessLoss||0)       : 0;
+  // Net adjusted business profit: Revenue − Allowable + Disallowable (IRD add-back) − Prior Loss (s.35)
+  const businessNetProfit   = Math.max(-(bGross), bGross - bAllow + bDisall);  // can be negative (loss)
+  const businessLossDeducted = businessNetProfit < 0 ? 0 : Math.min(businessNetProfit, bPrior);
+  const businessAssessable  = hasManualBusiness ? Math.max(0, businessNetProfit - businessLossDeducted) : 0;
+  // Business loss for current year (to inform user, carried forward by IRD)
+  const currentYearBusinessLoss = hasManualBusiness && businessNetProfit < 0 ? Math.abs(businessNetProfit) : 0;
+
+  // ── Rental Income Deduction (s.18 IRA) ─────────────────────────────────────
+  // AIT 10% if tenant is institution. Deduct 25% standard OR actual maintenance/depreciation
+  const grossRentalIncome = incByCat["Rental Income"] || 0;
+  const rentalMethod      = taxSettings?.rentalDeductionMethod || "standard";
+  const rentalActual      = taxSettings?.rentalActualExpenses || 0;
+  const rentalDeduction   = grossRentalIncome > 0
+    ? (rentalMethod === "actual" ? Math.min(rentalActual, grossRentalIncome) : grossRentalIncome * 0.25)
+    : 0;
+  const netRentalIncome   = grossRentalIncome - rentalDeduction;
+  // Adjust incByCat to show net rental
+  const incByCatAdjusted  = {...incByCat};
+  if(grossRentalIncome > 0) incByCatAdjusted["Rental Income"] = netRentalIncome;
+
+  // ── Export/Foreign/Capital/Gratuity — flat-rate income separated ───────────
   const exportIncome = (incByCat["Export/Foreign"]||0) +
     (incByCat["Export Services (15%)"]||0) +
     (incByCat["Foreign Remittance (15%)"]||0);
-  // Capital gains — 10% flat rate (separate from progressive IIT)
   const capitalGainsIncome = incByCat["Capital Gains"] || 0;
-  // Gratuity/terminal benefits — special rates (0%/6%/12%), separated from progressive IIT
-  const gratuityIncome = incByCat["Gratuity / Terminal Benefits"] || 0;
-  const slIncome     = totalGross - exportIncome - capitalGainsIncome - gratuityIncome;
+  const gratuityIncome     = incByCat["Gratuity / Terminal Benefits"] || 0;
 
-  // Freelancer: deduct allowable business expenses
+  // ── SL-source assessable income (progressive IIT base) ─────────────────────
+  // = Ledger income − flat-rate income − rental gross + net rental + manual business
+  const slIncomeLedger = totalGrossLedger - exportIncome - capitalGainsIncome - gratuityIncome
+                         - grossRentalIncome + netRentalIncome;
+
+  // Freelancer ledger expenses (still supported alongside manual entry)
   let allowableExpenses = 0;
   let expenseBreakdown  = {};
-  if(isFreelancer){
+  if(isFreelancer && !hasManualBusiness){
     expenseEntries.filter(e=>e.isBusiness).forEach(e=>{
       allowableExpenses += e.amount;
       expenseBreakdown[e.category] = (expenseBreakdown[e.category]||0) + e.amount;
     });
   }
 
-  const netIncome  = slIncome - allowableExpenses;
-  const taxable    = Math.max(0, netIncome - relief - qpRelief);
+  // Total SL-source income: ledger net + manual business assessable income
+  const slIncome  = slIncomeLedger - allowableExpenses + businessAssessable;
+  const netIncome = slIncome; // already net of expenses and adjustments
+  const totalGross = totalGrossLedger + (hasManualBusiness ? bGross : 0);
+
+  const taxable   = Math.max(0, slIncome - relief - qpRelief);
 
   // ── Apply year-specific progressive slabs ───────────────────────────────────
   let gradTax=0;
@@ -822,47 +876,70 @@ function computeTax(profile, incomeEntries, expenseEntries, taxSettings, activeY
     breakdown.push({label:s.label, rate:s.rate, chunk, tax:t});
   }
 
-  const exportTax  = exportIncome * cfg.exportRate;
-  const capitalGainsTax = capitalGainsIncome * 0.10;  // CGT 10% flat
-  // Gratuity/Terminal benefits: 0% first 10M, 6% next 10M, 12% balance
+  const exportTax       = exportIncome * cfg.exportRate;
+  const capitalGainsTax = capitalGainsIncome * 0.10;
   let gratuityTax = 0;
   if(gratuityIncome > 0){
     const g1 = Math.min(gratuityIncome, 10_000_000);
     const g2 = Math.min(Math.max(0, gratuityIncome - 10_000_000), 10_000_000);
     const g3 = Math.max(0, gratuityIncome - 20_000_000);
-    gratuityTax = g1*0 + g2*0.06 + g3*0.12;
+    gratuityTax = g2*0.06 + g3*0.12;
   }
-  const grossTax   = gradTax + exportTax + capitalGainsTax + gratuityTax;
-  const apitPaid   = taxSettings?.apitPaid || 0;
-  // Refund is capped at cfg.maxRefund for salaried (APIT excess)
-  const refundDue  = !isFreelancer ? Math.min(Math.max(0, apitPaid - grossTax), cfg.maxRefund) : 0;
-  const netTax     = Math.max(0, grossTax - apitPaid);
+  const grossTax = gradTax + exportTax + capitalGainsTax + gratuityTax;
 
-  // Mandatory filing check
-  const mustFile   = totalGross > cfg.filingThreshold;
-
-  // Quarterly advance tax for freelancers (25% each quarter — s.72 IRA)
-  const quarterlyTax = isFreelancer ? netTax/4 : 0;
+  // ── WHT/AIT Credits — all creditable against gross IIT ─────────────────────
+  // Auto-sum APIT from payslip scanner entries (incomeEntry.apitAmount)
+  // PLUS any manual apitPaid entered in Tax Year tab (e.g. T10 certificate total)
+  const apitFromEntries = incomeEntries.reduce((s,e) => s + (parseFloat(e.apitAmount)||0), 0);
+  const apitManual      = taxSettings?.apitPaid || 0;
+  // Use income-entry sum if user hasn't entered manual override, else use the higher of the two
+  // (prevents double-counting if user enters T10 total AND has scanned entries)
+  const apitPaid        = apitManual > 0 ? apitManual : apitFromEntries;
+  const whtTotal       = (taxSettings?.whtDirectorsFees||0)
+                       + (taxSettings?.whtFreelance||0)
+                       + (taxSettings?.whtRoyalties||0)
+                       + (taxSettings?.whtRentalAIT||0)
+                       + (taxSettings?.whtDividendAIT||0)
+                       + (taxSettings?.whtInterestAIT||0)
+                       + (taxSettings?.whtOther||0);
+  const totalCredits   = apitPaid + whtTotal;
+  const refundDue      = !isFreelancer ? Math.min(Math.max(0, totalCredits - grossTax), cfg.maxRefund) : 0;
+  const netTax         = Math.max(0, grossTax - totalCredits);
+  const mustFile       = totalGross > cfg.filingThreshold;
+  const quarterlyTax   = isFreelancer ? netTax/4 : 0;
 
   return {
     taxable, slIncome, netIncome, relief, qpRelief, grossTax, exportTax, capitalGainsTax, capitalGainsIncome,
     gratuityIncome, gratuityTax, apitPaid, netTax,
-    breakdown, isNRNC, incByCat, totalGross, exportIncome, allowableExpenses, expenseBreakdown,
+    breakdown, isNRNC, incByCat: incByCatAdjusted, incByCatRaw: incByCat, totalGross,
+    exportIncome, allowableExpenses, expenseBreakdown,
     quarterlyTax, isFreelancer, refundDue, mustFile,
+    // Rental
+    grossRentalIncome, rentalDeduction, netRentalIncome, rentalMethod,
+    // Business manual
+    hasManualBusiness, bGross, bAllow, bDisall, bPrior,
+    businessNetProfit, businessLossDeducted, businessAssessable, currentYearBusinessLoss,
+    // WHT Credits
+    whtTotal, totalCredits,
+    apitFromEntries, apitManual,
     cfg, yr,
     personalRelief: cfg.personalRelief, qpCap: cfg.qpCap, maxRefund: cfg.maxRefund,
   };
 }
 
-function computePenalty(netTax, filingDate) {
-  if(!filingDate || netTax<=0) return { lateFee:0, monthly:0, total:0, months:0, isLate:false };
-  const due   = new Date("2026-11-30");
-  const filed = new Date(filingDate);
-  if(filed<=due) return { lateFee:0, monthly:0, total:0, months:0, isLate:false };
+function computePenalty(netTax, filingDate, activeYear) {
+  if(!filingDate || netTax<=0) return { lateFee:0, monthly:0, total:0, months:0, isLate:false, deadline:"" };
+  // Deadline = 30 November of the year AFTER the assessment year ends
+  // Y/A 2022/2023 → 30 Nov 2023 | Y/A 2025/2026 → 30 Nov 2026 etc.
+  const toYear   = parseInt((activeYear||"2025/2026").split("/")[1]);
+  const deadline = `${toYear}-11-30`;
+  const due      = new Date(deadline);
+  const filed    = new Date(filingDate);
+  if(filed<=due) return { lateFee:0, monthly:0, total:0, months:0, isLate:false, deadline };
   const months  = Math.ceil((filed-due)/(30.44*86400000));
   const lateFee = netTax*0.05;
   const monthly = netTax*0.01*months;
-  return { lateFee, monthly, total:lateFee+monthly, months, isLate:true };
+  return { lateFee, monthly, total:lateFee+monthly, months, isLate:true, deadline };
 }
 
 // ─── Storage ───────────────────────────────────────────────────────────────────
@@ -1113,8 +1190,7 @@ export default function App(){
       <div style={S.screen}>
         {tab==="dashboard"&&<Dashboard   {...props}/>}
         {tab==="book"     &&<TransactionBook {...props}/>}
-        {tab==="income"   &&<IncomePage   {...props}/>}
-        {tab==="tax"      &&<TaxPage      {...props}/>}
+        {(tab==="income"||tab==="tax")&&<IncomeTaxPage {...props}/>}
         {tab==="reports"  &&<ReportsPage  {...props}/>}
         {tab==="cashreport"&&<CashBookReport {...props}/>}
         {tab==="services" &&<ServicesPage {...props}/>}
@@ -2138,8 +2214,7 @@ function NavBar({tab,setTab,lang}){
   const FINANCE_TABS = new Set(["tools","cashreport"]);
   const tabs=[
     {id:"dashboard",  icon:"🏠", key:"nav_dashboard",  group:"tax"},
-    {id:"tax",        icon:"📅", key:"nav_tax",         group:"tax"},
-    {id:"income",     icon:"📥", key:"nav_income",      group:"tax"},
+    {id:"income",     icon:"📊", key:"nav_income",      group:"tax"},
     {id:"reports",    icon:"📊", key:"nav_reports",     group:"tax"},
     {id:"book",       icon:"📒", key:"nav_book",        group:"tax"},
     {id:"cashreport", icon:"📄", key:"nav_cashreport",  group:"finance"},
@@ -2394,7 +2469,9 @@ function TransactionBook({data,update,cashBalance,totalBankBal,bankBalance,profi
   return(
     <div style={S.page}>
       {showPayslip&&<PayslipScanner onClose={()=>setShowPayslip(false)} onExtracted={(ex)=>{
-        update({incomeEntries:[...data.incomeEntries,{id:uid(),category:"Salary",amount:parseFloat(ex.gross)||0,apitAmount:parseFloat(ex.apit)||0,description:`Salary slip — EPF: ${ex.epf||0} ETF: ${ex.etf||0}`,month:ex.month}]});
+        // Add income entry with apitAmount — computeTax auto-sums these for APIT credit
+        const newEntry={id:uid(),category:"Salary / Wages",amount:parseFloat(ex.gross)||0,apitAmount:parseFloat(ex.apit)||0,description:`Payslip ${ex.month} — EPF: Rs.${ex.epf||0} ETF: Rs.${ex.etf||0}`,month:ex.month};
+        update({incomeEntries:[...data.incomeEntries,newEntry]});
         setShowPayslip(false);
       }}/>}
       {showImport&&<BankImportModal data={data} update={update} onClose={()=>setShowImport(false)}/>}
@@ -2658,7 +2735,7 @@ function IncomeSourcesGuide({activeYear, isFreelancer}) {
       ref:"IRA Sections 2–10",
       desc:"Gains & profits from employment — taxed at progressive IIT rates via APIT deduction",
       sources:[
-        {icon:"💰",name:"Salary / Wages",            wht:null,    rate:"APIT",       note:"Regular salary, wages, allowances — employer deducts APIT monthly (threshold: Rs.150,000/mo from Y/A 2025/26)"},
+        {icon:"💰",name:"Salary / Wages",            wht:null,    rate:"APIT",       note:`Regular salary, wages, allowances — employer deducts APIT monthly. Threshold for ${activeYear||"2025/2026"}: Rs.${(cfg.apitMonthlyThreshold/1000).toFixed(0)},000/month`},
         {icon:"🏦",name:"Director's Fees",           wht:"5%",    rate:"WHT 5%",     note:"Section 83 — WHT 5% deducted at source by company"},
         {icon:"🎯",name:"Bonus / Incentive",          wht:null,    rate:"APIT",       note:"Performance bonus, incentive pay — part of employment income, employer deducts APIT"},
         {icon:"⏰",name:"Overtime Pay",               wht:null,    rate:"APIT",       note:"Overtime included in employment income — APIT applies"},
@@ -2689,7 +2766,7 @@ function IncomeSourcesGuide({activeYear, isFreelancer}) {
       sources:[
         {icon:"🏠",name:"Rental Income",              wht:"10%",   rate:"AIT 10%",    note:"AIT 10% if tenant is institution/company. Deduct 25% rental relief OR actual maintenance/depreciation — s.18 IRA"},
         {icon:"📊",name:"Dividends",                  wht:"15%",   rate:"AIT 15%",    note:"AIT 15% deducted at source by company. Gross dividend (incl. AIT) included in assessable income — s.21 IRA"},
-        {icon:"🏦",name:"Interest / FD Income",       wht:cfg.aitRate===0.10?"10%":"5%", rate:`AIT ${cfg.aitRate===0.10?"10%":"5%"}`, note:`AIT ${cfg.aitRate===0.10?"10% (increased from Y/A 2025/26)":"5% (rate was 5% pre-2025/26, increased to 10% from 01.04.2025)"}. Enter gross interest before AIT — s.20 IRA`},
+        {icon:"🏦",name:"Interest / FD Income",       wht:`${(cfg.aitRate*100).toFixed(0)}%`, rate:`AIT ${(cfg.aitRate*100).toFixed(0)}%`, note:`AIT ${(cfg.aitRate*100).toFixed(0)}% deducted at source for ${activeYear||"2025/2026"}. Enter gross interest (before AIT deduction). AIT is creditable against your final IIT liability — s.20 IRA`},
         {icon:"📝",name:"Royalties",                  wht:"10%",   rate:"WHT 10%",    note:"WHT 10% deducted at source. Gross royalty (incl. WHT) is assessable investment income — s.22 IRA"},
         {icon:"🔄",name:"Annuity / Private Pension",  wht:null,    rate:"IIT Rate",   note:"Annuity from insurance policy or approved private pension scheme — assessable investment income — s.24 IRA"},
       ]
@@ -2700,7 +2777,7 @@ function IncomeSourcesGuide({activeYear, isFreelancer}) {
       desc:"Income taxed at flat rates separate from regular progressive IIT",
       sources:[
         {icon:"📈",name:"Capital Gains",              wht:"10%",   rate:"CGT 10%",    note:"10% flat CGT on disposal of investment assets (land, buildings, unlisted shares). LISTED share gains: EXEMPT — s.40 IRA"},
-        {icon:"🌐",name:"Export Services",            wht:"15%",   rate:"15% flat",   note:"Services in/outside SL to foreign clients, payment in foreign currency remitted via bank to SL. Tax exemption REMOVED from 01.04.2025 — now 15% flat per Act No.2/2025"},
+        {icon:"🌐",name:"Export Services",            wht:cfg.exportExempt?"0%":"15%",   rate:cfg.exportExempt?"✅ EXEMPT":"15% flat",   note:cfg.exportExempt?`EXEMPT for ${activeYear||""} — services to foreign clients, payment in foreign currency remitted via SL bank. Exemption applies under s.9(1)(q) IRA for this Y/A`:`15% flat tax for ${activeYear||""} — exemption REMOVED by Act No.02/2025 from 01.04.2025. Services rendered to foreign clients, payment in foreign currency remitted via SL bank`},
         {icon:"🌍",name:"Foreign Remittance",         wht:"15%",   rate:"15% flat",   note:"Foreign-sourced income (non-services) earned in foreign currency and remitted to Sri Lanka through a bank. 15% flat rate — s.59 IRA"},
       ]
     },
@@ -2767,411 +2844,561 @@ function IncomeSourcesGuide({activeYear, isFreelancer}) {
   );
 }
 
-function IncomePage({data,update,tax,profile,incomeCats,activeYear}){
-  const [showForm,setShowForm]=useState(false);
-  const [showScanner,setShowScanner]=useState(false);
-  const [form,setForm]=useState({category:incomeCats[0],amount:"",description:"",month:today().slice(0,7),apitAmount:""});
-  const add=()=>{
-    if(!form.amount||!form.description)return;
+function IncomeTaxPage({data,update,tax,profile,incomeCats,activeYear}){
+  // ── Combined Income + Tax sub-tab state ──────────────────────────────────────
+  const [subTab,setSubTab]   = useState("income");
+  // Income entry state
+  const [showForm,setShowForm]     = useState(false);
+  const [showScanner,setShowScanner]= useState(false);
+  const [form,setForm] = useState({category:incomeCats[0],amount:"",description:"",month:today().slice(0,7),apitAmount:""});
+  // Tax state
+  const [filingDate,setFilingDate] = useState("");
+  const [showNotes,setShowNotes]   = useState(false);
+  // Shared
+  const ts = data.taxSettings;
+  const sv = p => update({taxSettings:{...ts,...p}});
+  const yr = activeYear || DEFAULT_YEAR;
+  const cfg = tax.cfg || getTaxCfg(activeYear);
+  const isFreelancer = profile?.employmentType === "freelancer";
+  const penalty = computePenalty(tax.netTax, filingDate, yr);
+  const isHistorical = ["2022/2023","2023/2024","2024/2025"].includes(yr);
+
+  const add = () => {
+    if(!form.amount||!form.description) return;
     update({incomeEntries:[...data.incomeEntries,{...form,id:uid(),amount:parseFloat(form.amount),apitAmount:parseFloat(form.apitAmount)||0}]});
     setForm({category:incomeCats[0],amount:"",description:"",month:today().slice(0,7),apitAmount:""});
     setShowForm(false);
   };
-  const del=id=>update({incomeEntries:data.incomeEntries.filter(e=>e.id!==id)});
-  const isFreelancer=profile?.employmentType==="freelancer";
+  const del = id => update({incomeEntries:data.incomeEntries.filter(e=>e.id!==id)});
+
+  // Sub-tab definitions
+  const SUB_TABS = [
+    {id:"income",     icon:"📥", label:"Income"},
+    {id:"deductions", icon:"🧾", label:"Deductions"},
+    {id:"tax",        icon:"🧮", label:"Tax Calc"},
+    {id:"guide",      icon:"📋", label:"IRD Guide"},
+  ];
 
   return(
     <div style={S.page}>
       {showScanner&&<PayslipScanner onClose={()=>setShowScanner(false)} onExtracted={(ex)=>{
-        update({incomeEntries:[...data.incomeEntries,{id:uid(),category:"Salary",amount:parseFloat(ex.gross)||0,apitAmount:parseFloat(ex.apit)||0,description:`Salary slip — EPF: ${ex.epf||0} ETF: ${ex.etf||0}`,month:ex.month}]});
+        // Add income entry with apitAmount — computeTax auto-sums these for APIT credit
+        const newEntry={id:uid(),category:"Salary / Wages",amount:parseFloat(ex.gross)||0,apitAmount:parseFloat(ex.apit)||0,description:`Payslip ${ex.month} — EPF: Rs.${ex.epf||0} ETF: Rs.${ex.etf||0}`,month:ex.month};
+        update({incomeEntries:[...data.incomeEntries,newEntry]});
         setShowScanner(false);
       }}/>}
-      <div style={S.pageHdr}><div style={S.pageTitle}>📥 Income Sources — {activeYear}</div><button
-  className={(!showForm && data.incomeEntries.length===0) ? "pulse-gold" : ""}
-  style={{...S.addBtn,...((!showForm && data.incomeEntries.length===0)?{background:"linear-gradient(135deg,#1a2a04,#2a4008)",borderColor:"#f5d060",color:"#f5d060",fontWeight:"800"}:{})}}
-  onClick={()=>setShowForm(!showForm)}>
-  {showForm ? "✕" : (data.incomeEntries.length===0 ? "✨ Add Income" : "+ Add")}
-</button></div>
 
-      {!isFreelancer&&(
-        <button onClick={()=>setShowScanner(true)} style={{width:"100%",padding:"11px",background:"linear-gradient(135deg,#064e3b,#065f46)",border:"1px solid #10b981",borderRadius:10,color:"#6ee7b7",fontWeight:"800",fontSize:13,cursor:"pointer",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          📸 Scan Payslip (Auto-fill from photo)
-        </button>
-      )}
-
-      {isFreelancer&&(
-        <div style={{...S.card,border:"1px solid #f59e0b",background:"linear-gradient(160deg,#1a1000,#2a1800)"}}>
-          <div style={{...S.cardTitle,color:"#fbbf24"}}>💻 Freelancer Tax Summary</div>
-          <TRow l="Gross Income"         v={fmt(tax.totalGross)}        c="#e2e8f0"/>
-          <TRow l="Business Expenses"    v={"("+fmt(tax.allowableExpenses)+")"} c="#34d399"/>
-          <TRow l="Net Income"           v={fmt(tax.netIncome)}         c="#fbbf24" bold/>
-          <TRow l="Personal Relief"      v={"("+fmt(tax.relief)+")"} c="#34d399"/>
-          <TRow l="Taxable Income"       v={fmt(tax.taxable)}           c="#f5d060" bold/>
-          <TRow l="Tax Liability"        v={fmt(tax.grossTax)}          c="#f87171"/>
-          <div style={S.divider}/>
-          <TRow l="Quarterly Advance Tax" v={fmt(tax.quarterlyTax)} c="#f59e0b"/>
+      {/* ── Page header ─────────────────────────────────────────────────────── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:"#f1f5f9"}}>
+            {subTab==="income"?"📥 Income Sources":subTab==="deductions"?"🧾 Deductions":subTab==="tax"?"🧮 Tax Calculation":"📋 IRD Guide"} — {yr}
+          </div>
+          <div style={{fontSize:10,color:"#475569",marginTop:2}}>{cfg.act}</div>
         </div>
-      )}
-
-      {/* ── IRD Income Sources Guide with Section Tabs ── */}
-      <IncomeSourcesGuide activeYear={activeYear} isFreelancer={isFreelancer}/>
-
-      <div style={S.card}>
-        <div style={S.cardTitle}>Annual Income Breakdown</div>
-        {incomeCats.map(cat=>{
-          const amt=tax.incByCat[cat]||0;
-          const pct=tax.totalGross>0?(amt/tax.totalGross*100):0;
-          return(
-            <div key={cat} style={{marginBottom:10}}>
-              <div style={S.row}>
-                <span style={{color:"#cbd5e1",fontSize:12}}>{catIcon(cat)} {cat}</span>
-                <span style={{color:"#34d399",fontSize:12,fontWeight:"600"}}>{fmt(amt)}</span>
-              </div>
-              {cat==="Export/Foreign"&&amt>0&&<div style={{fontSize:10,color:"#f59e0b",marginBottom:2}}>⚡ 15% flat tax applies</div>}
-              <div style={{background:"#1e293b",borderRadius:4,height:5}}><div style={{height:5,borderRadius:4,background:"linear-gradient(90deg,#10b981,#34d399)",width:`${pct}%`,transition:"width 0.5s"}}/></div>
-            </div>
-          );
-        })}
-        <div style={S.divider}/>
-        <div style={{...S.row,fontWeight:"700"}}><span style={{color:"#fbbf24"}}>Total Gross</span><span style={{color:"#fbbf24"}}>{fmt(tax.totalGross)}</span></div>
-        {tax.totalGross>=MANDATORY_THRESHOLD&&<div style={{fontSize:10,color:"#f59e0b",marginTop:6}}>⚠️ Must file return by {FILING_DEADLINE}</div>}
+        {subTab==="income"&&(
+          <button
+            className={(!showForm && data.incomeEntries.length===0)?"pulse-gold":""}
+            style={{...S.addBtn,...((!showForm && data.incomeEntries.length===0)?{background:"linear-gradient(135deg,#1a2a04,#2a4008)",borderColor:"#f5d060",color:"#f5d060",fontWeight:"800"}:{})}}
+            onClick={()=>setShowForm(!showForm)}>
+            {showForm?"✕":(data.incomeEntries.length===0?"✨ Add Income":"+ Add")}
+          </button>
+        )}
       </div>
 
-      {showForm&&(
-        <FormCard title="Add Income Entry">
-          <FS label="Income Type / Source (IRD)" value={form.category} options={incomeCats} onChange={v=>setForm(f=>({...f,category:v}))}/>
-          {/* WHT / AIT guidance per income type */}
-          {(()=>{
-            const meta=INCOME_CAT_META[form.category];
-            if(!meta) return null;
-            const isExport=form.category.includes("Export")||form.category.includes("Foreign Remittance");
-            const isCapGain=form.category==="Capital Gains";
-            const isDividend=form.category==="Dividends";
-            const isInterest=form.category.includes("Interest");
-            const bg=isExport?"#1a1000":isCapGain?"#0a0a1a":isDividend?"#160820":isInterest?"#001a10":"#021a12";
-            const bc=isExport?"#f59e0b":isCapGain?"#6366f1":isDividend?"#a78bfa":isInterest?"#10b981":"#065f46";
-            const tc=isExport?"#fbbf24":isCapGain?"#c4b5fd":isDividend?"#c4b5fd":isInterest?"#6ee7b7":"#6ee7b7";
-            return(
-              <div style={{background:bg,border:`1px solid ${bc}`,borderRadius:8,padding:"8px 10px",marginBottom:10}}>
-                <div style={{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
-                  {meta.wht&&<span style={{background:"#b8960c",color:"#fff",fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,flexShrink:0,marginTop:1}}>WHT/AIT {meta.wht}</span>}
-                  <span style={{fontSize:10,color:tc,lineHeight:1.5,flex:1}}>{meta.note}</span>
+      {/* ── Sub-tab strip ────────────────────────────────────────────────────── */}
+      <div style={{display:"flex",gap:4,marginBottom:12,background:"#060d1a",borderRadius:10,padding:4}}>
+        {SUB_TABS.map(t=>(
+          <button key={t.id} onClick={()=>setSubTab(t.id)}
+            style={{flex:1,padding:"8px 4px",border:"none",borderRadius:7,cursor:"pointer",fontSize:10,fontWeight:700,
+              background:subTab===t.id?"linear-gradient(135deg,#0a1228,#111827)":"transparent",
+              color:subTab===t.id?"#f5d060":"#475569",
+              boxShadow:subTab===t.id?"0 2px 8px rgba(0,0,0,0.4)":"none",
+              transition:"all 0.2s"}}>
+            <div style={{fontSize:16,marginBottom:2}}>{t.icon}</div>
+            <div>{t.label}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          SUB-TAB 1 — 📥 INCOME
+      ════════════════════════════════════════════════════════════════════════ */}
+      {subTab==="income"&&(
+        <>
+          {!isFreelancer&&(
+            <button onClick={()=>setShowScanner(true)} style={{width:"100%",padding:"11px",background:"linear-gradient(135deg,#064e3b,#065f46)",border:"1px solid #10b981",borderRadius:10,color:"#6ee7b7",fontWeight:"800",fontSize:13,cursor:"pointer",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              📸 Scan Payslip (Auto-fill from photo)
+            </button>
+          )}
+
+          {isFreelancer&&(
+            <div style={{...S.card,border:"1px solid #f59e0b",background:"linear-gradient(160deg,#1a1000,#2a1800)"}}>
+              <div style={{...S.cardTitle,color:"#fbbf24"}}>💻 Freelancer Tax Summary</div>
+              <TRow l="Gross Income"          v={fmt(tax.totalGross)}         c="#e2e8f0"/>
+              <TRow l="Business Expenses"     v={"("+fmt(tax.allowableExpenses)+")"} c="#34d399"/>
+              <TRow l="Net Income"            v={fmt(tax.netIncome)}          c="#fbbf24" bold/>
+              <TRow l="Personal Relief"       v={"("+fmt(tax.relief)+")"}     c="#34d399"/>
+              <TRow l="Taxable Income"        v={fmt(tax.taxable)}            c="#f5d060" bold/>
+              <TRow l="Tax Liability"         v={fmt(tax.grossTax)}           c="#f87171"/>
+              {tax.totalCredits>0&&<TRow l="Less: WHT/APIT Credits" v={"("+fmt(tax.totalCredits)+")"} c="#34d399"/>}
+              <TRow l="Net Tax Payable"       v={fmt(tax.netTax)}             c={tax.netTax>0?"#f87171":"#34d399"} bold/>
+              <div style={S.divider}/>
+              <TRow l="Quarterly Advance Tax" v={fmt(tax.quarterlyTax)}       c="#f59e0b"/>
+            </div>
+          )}
+
+          {/* Add income form */}
+          {showForm&&(
+            <FormCard title="Add Income Entry">
+              <FS label="Income Type / Source (IRD)" value={form.category} options={incomeCats} onChange={v=>setForm(f=>({...f,category:v}))}/>
+              {(()=>{
+                const meta=INCOME_CAT_META[form.category];
+                if(!meta) return null;
+                const isExport=form.category.includes("Export")||form.category.includes("Foreign Remittance");
+                const isCapGain=form.category==="Capital Gains";
+                const isDividend=form.category==="Dividends";
+                const isInterest=form.category.includes("Interest");
+                const bg=isExport?"#1a1000":isCapGain?"#0a0a1a":isDividend?"#160820":isInterest?"#001a10":"#021a12";
+                const bc=isExport?"#f59e0b":isCapGain?"#6366f1":isDividend?"#a78bfa":isInterest?"#10b981":"#065f46";
+                const tc=isExport?"#fbbf24":isCapGain?"#c4b5fd":isDividend?"#c4b5fd":isInterest?"#6ee7b7":"#6ee7b7";
+                return(
+                  <div style={{background:bg,border:`1px solid ${bc}`,borderRadius:8,padding:"8px 10px",marginBottom:10}}>
+                    <div style={{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
+                      {meta.wht&&<span style={{background:"#b8960c",color:"#fff",fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,flexShrink:0,marginTop:1}}>WHT/AIT {meta.wht}</span>}
+                      <span style={{fontSize:10,color:tc,lineHeight:1.5,flex:1}}>{meta.note}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+              <FI label="Month / Period" type="month" value={form.month} onChange={v=>setForm(f=>({...f,month:v}))}/>
+              <FI label="Gross Amount (Rs.)" type="number" value={form.amount} onChange={v=>setForm(f=>({...f,amount:v}))} placeholder="0.00"/>
+              <FI label="Description / Payer" value={form.description} onChange={v=>setForm(f=>({...f,description:v}))} placeholder="e.g. ABC Ltd, Bank of Ceylon FD"/>
+              {["Salary / Wages","Bonus / Incentive","Non-Cash Benefits","Overtime Pay","Pension from Employment","ESOP / Share Scheme Gains"].includes(form.category)&&(
+                <FI label="APIT Deducted by Employer (Rs.)" type="number" value={form.apitAmount} onChange={v=>setForm(f=>({...f,apitAmount:v}))} placeholder="From salary slip / T10 certificate"/>
+              )}
+              {form.category==="Gratuity / Terminal Benefits"&&(
+                <div style={{background:"#1a0e00",border:"1px solid #92400e",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                  <div style={{fontSize:10,color:"#fbbf24",fontWeight:700,marginBottom:3}}>⚡ Special Tax Rates Apply (IRA s.7)</div>
+                  <div style={{fontSize:9,color:"#94a3b8"}}>First Rs.10,000,000 @ 0% · Next Rs.10,000,000 @ 6% · Balance @ 12%</div>
                 </div>
+              )}
+              {INCOME_CAT_META[form.category]?.wht && form.category!=="Salary / Wages" && form.category!=="Bonus / Incentive" && form.category!=="Non-Cash Benefits"&&(
+                <FI label={`WHT / AIT Deducted at Source (Rs.) [${INCOME_CAT_META[form.category].wht}]`} type="number" value={form.apitAmount} onChange={v=>setForm(f=>({...f,apitAmount:v}))} placeholder="From WHT certificate / bank statement"/>
+              )}
+              <button style={S.submitBtn} onClick={add}>✓ Save Income Entry</button>
+            </FormCard>
+          )}
+
+          {/* Annual income breakdown */}
+          <div style={S.card}>
+            <div style={S.cardTitle}>Annual Income Breakdown</div>
+            {incomeCats.map(cat=>{
+              const amt=tax.incByCat[cat]||0;
+              const pct=tax.totalGross>0?(amt/tax.totalGross*100):0;
+              return(
+                <div key={cat} style={{marginBottom:10}}>
+                  <div style={S.row}>
+                    <span style={{color:"#cbd5e1",fontSize:12}}>{catIcon(cat)} {cat}</span>
+                    <span style={{color:"#34d399",fontSize:12,fontWeight:"600"}}>{fmt(amt)}</span>
+                  </div>
+                  {cat==="Export/Foreign"&&amt>0&&<div style={{fontSize:10,color:"#f59e0b",marginBottom:2}}>⚡ 15% flat tax applies</div>}
+                  <div style={{background:"#1e293b",borderRadius:4,height:5}}><div style={{height:5,borderRadius:4,background:"linear-gradient(90deg,#10b981,#34d399)",width:`${pct}%`,transition:"width 0.5s"}}/></div>
+                </div>
+              );
+            })}
+            <div style={S.divider}/>
+            <div style={{...S.row,fontWeight:"700"}}><span style={{color:"#fbbf24"}}>Total Gross</span><span style={{color:"#fbbf24"}}>{fmt(tax.totalGross)}</span></div>
+            {tax.totalGross>=MANDATORY_THRESHOLD&&<div style={{fontSize:10,color:"#f59e0b",marginTop:6}}>⚠️ Must file return by {penalty.deadline||`30 Nov ${parseInt(yr.split("/")[1])}`}</div>}
+          </div>
+
+          {/* Freelancer expenses */}
+          {isFreelancer&&(data.expenseEntries||[]).length>0&&(
+            <div style={S.card}>
+              <div style={S.cardTitle}>🧾 Allowable Business Expenses</div>
+              {Object.entries(tax.expenseBreakdown).map(([cat,amt])=>(
+                <div key={cat} style={S.row}><span style={{color:"#94a3b8",fontSize:12}}>{cat}</span><span style={{color:"#34d399",fontSize:12,fontWeight:"600"}}>{fmt(amt)}</span></div>
+              ))}
+              <div style={S.divider}/>
+              <TRow l="Total Deductible Expenses" v={fmt(tax.allowableExpenses)} c="#34d399" bold/>
+            </div>
+          )}
+
+          {/* Grouped income entries */}
+          {incomeCats.map(cat=>{
+            const rows=data.incomeEntries.filter(e=>e.category===cat);
+            if(!rows.length) return null;
+            return(
+              <div key={cat} style={S.card}>
+                <div style={S.cardTitle}>{catIcon(cat)} {cat}</div>
+                {rows.sort((a,b)=>b.month.localeCompare(a.month)).map(e=>(
+                  <div key={e.id} style={S.txnRow}>
+                    <div style={{flex:1}}><div style={S.txnDesc}>{e.description}</div><div style={S.txnDate}>{e.month}{e.apitAmount?` · APIT: ${fmtC(e.apitAmount)}`:""}</div></div>
+                    <div style={{textAlign:"right"}}><div style={{color:"#34d399",fontWeight:"700",fontSize:13}}>{fmt(e.amount)}</div><button style={S.delBtn} onClick={()=>del(e.id)}>🗑</button></div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {data.incomeEntries.length===0&&<Empty icon="📥" text="No income entries yet"/>}
+        </>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          SUB-TAB 2 — 🧾 DEDUCTIONS
+      ════════════════════════════════════════════════════════════════════════ */}
+      {subTab==="deductions"&&(
+        <>
+          {/* Employment type badge */}
+          <div style={{...S.card,border:"1px solid "+(isFreelancer?"#f59e0b":"#1d4ed8"),background:isFreelancer?"linear-gradient(135deg,#1a1000,#2a1800)":"linear-gradient(135deg,#0a1a3a,#0f2040)",marginBottom:12}}>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:28}}>{isFreelancer?"💻":"🏢"}</span>
+              <div>
+                <div style={{fontSize:14,fontWeight:"800",color:isFreelancer?"#fbbf24":"#93c5fd"}}>{isFreelancer?"Freelancer / Self-Employed":"Salaried Employee"}</div>
+                <div style={{fontSize:11,color:"#64748b"}}>{isFreelancer?"Business income rules · Expense deductions apply · Quarterly advance tax":"Employment income · APIT deducted at source · Standard reliefs"}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Residency */}
+          <div style={S.card}>
+            <div style={S.cardTitle}>🌍 Residency Status</div>
+            {RESIDENCY_OPTS.map(o=>(
+              <div key={o.v} onClick={()=>sv({residency:o.v})} style={{...S.resOpt,...(ts.residency===o.v?S.resOptA:{})}}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                  <div style={{width:14,height:14,borderRadius:"50%",border:"2px solid "+(ts.residency===o.v?"#b8960c":"#334155"),background:ts.residency===o.v?"#b8960c":"transparent",flexShrink:0,marginTop:2}}/>
+                  <div><div style={{fontSize:12,fontWeight:"600",color:ts.residency===o.v?"#f5d060":"#e2e8f0"}}>{o.l}</div><div style={{fontSize:10,color:"#64748b"}}>{o.desc}</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Reliefs & Deductions */}
+          <FormCard title="🧾 Personal Relief & Qualifying Payments">
+            <div style={{background:"#0a1a0a",border:"1px solid #10b981",borderRadius:8,padding:"8px",marginBottom:10,fontSize:11,color:"#6ee7b7"}}>Personal Relief: <b>{fmt(tax.relief)}</b>{tax.isNRNC?" (NRNC — No relief applies)":""}</div>
+            {!tax.isNRNC&&(
+              <>
+                <FI label="Qualifying Payments (Rs.)" type="number" value={ts.qualifyingPayments||""} onChange={v=>sv({qualifyingPayments:parseFloat(v)||0})} placeholder="Max Rs.1,200,000"/>
+                <div style={{fontSize:10,color:"#64748b",marginBottom:8}}>Life insurance, charity donations, unit trust, voluntary EPF/ETF, solar panel investment. Cap: Rs.1,200,000</div>
+                <div style={{fontSize:11,color:"#34d399",marginBottom:10}}>Relief applied: {fmt(tax.qpRelief)}</div>
+              </>
+            )}
+            {!isFreelancer&&(()=>{
+              const autoApit = (data.incomeEntries||[]).reduce((s,e)=>s+(parseFloat(e.apitAmount)||0),0);
+              return(
+                <div>
+                  {autoApit>0&&(
+                    <div style={{background:"#071507",border:"1px solid #10b981",borderRadius:8,padding:"8px 10px",marginBottom:8,fontSize:11,color:"#6ee7b7",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span>🤖 Auto from payslip entries: <b>{fmt(autoApit)}</b></span>
+                      {ts.apitPaid>0&&<span style={{color:"#f59e0b",fontSize:10}}>Manual override active</span>}
+                    </div>
+                  )}
+                  <FI label={`APIT Paid at Source (Rs.)${autoApit>0?" — leave 0 to use auto-sum":""}`} type="number" value={ts.apitPaid||""} onChange={v=>sv({apitPaid:parseFloat(v)||0})} placeholder={autoApit>0?`Auto: ${fmt(autoApit)} from scanned slips — enter T10 total to override`:"Total from salary slips / T10 certificate"}/>
+                </div>
+              );
+            })()}
+            {isFreelancer&&<div style={{background:"#1a1000",border:"1px solid #f59e0b",borderRadius:8,padding:"8px",marginBottom:10,fontSize:11,color:"#fbbf24"}}>💻 Freelancers: Also record business expenses in the Transaction Ledger and mark them as "Business Expense (Tax Deductible)".</div>}
+          </FormCard>
+
+          {/* WHT / AIT Credits */}
+          <FormCard title="🏦 WHT / AIT Credits at Source">
+            <div style={{background:"#071a07",border:"1px solid #10b981",borderRadius:8,padding:"8px",marginBottom:10,fontSize:11,color:"#6ee7b7"}}>
+              Enter WHT / AIT amounts <b>already deducted at source</b> on each income type. These are credited against your gross IIT liability. Total credits: <b>{fmt(tax.totalCredits)}</b>
+            </div>
+            <FI label={`AIT on FD Interest (${(cfg.aitRate*100).toFixed(0)}%) — s.20 IRA`} type="number" value={ts.whtInterestAIT||""} onChange={v=>sv({whtInterestAIT:parseFloat(v)||0})} placeholder="AIT deducted by bank / FI"/>
+            <FI label="AIT on Dividends (15%) — s.21 IRA" type="number" value={ts.whtDividendAIT||""} onChange={v=>sv({whtDividendAIT:parseFloat(v)||0})} placeholder="AIT deducted at source by company"/>
+            <FI label="AIT on Rental Income (10%) — s.18 IRA" type="number" value={ts.whtRentalAIT||""} onChange={v=>sv({whtRentalAIT:parseFloat(v)||0})} placeholder="AIT if tenant is institution/company"/>
+            <FI label="WHT on Director's Fees (5%) — s.83 IRA" type="number" value={ts.whtDirectorsFees||""} onChange={v=>sv({whtDirectorsFees:parseFloat(v)||0})} placeholder="WHT deducted by company"/>
+            <FI label="WHT on Freelance / Contract / Consulting (5%)" type="number" value={ts.whtFreelance||""} onChange={v=>sv({whtFreelance:parseFloat(v)||0})} placeholder="WHT deducted at source by payer"/>
+            <FI label="WHT on Royalties (10%) — s.22 IRA" type="number" value={ts.whtRoyalties||""} onChange={v=>sv({whtRoyalties:parseFloat(v)||0})} placeholder="WHT deducted at source"/>
+            <FI label="Other WHT / AIT Deducted at Source" type="number" value={ts.whtOther||""} onChange={v=>sv({whtOther:parseFloat(v)||0})} placeholder="Any other source-deducted tax"/>
+            <div style={{fontSize:11,color:"#34d399",marginTop:6,fontWeight:700}}>Total WHT/AIT Credits: {fmt(tax.whtTotal)} &nbsp;|&nbsp; Total All Credits (incl APIT): {fmt(tax.totalCredits)}</div>
+          </FormCard>
+
+          {/* Rental Income Deduction */}
+          {(tax.incByCatRaw?.["Rental Income"]||0)>0&&(
+            <FormCard title="🏠 Rental Income Deduction — s.18 IRA">
+              <div style={{background:"#071507",border:"1px solid #10b981",borderRadius:8,padding:"8px",marginBottom:10,fontSize:11,color:"#6ee7b7"}}>
+                Gross Rental Income: <b>{fmt(tax.grossRentalIncome)}</b> · Net assessable: <b>{fmt(tax.netRentalIncome)}</b>
+              </div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                {[["standard","📐 Standard 25%"],["actual","🧾 Actual Expenses"]].map(([v,l])=>(
+                  <div key={v} onClick={()=>sv({rentalDeductionMethod:v})}
+                    style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid ${ts.rentalDeductionMethod===v?"#10b981":"#1e3a5f"}`,background:ts.rentalDeductionMethod===v?"#0a2a15":"#060d1a",cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:ts.rentalDeductionMethod===v?"#34d399":"#64748b"}}>{l}</div>
+                    {v==="standard"&&<div style={{fontSize:9,color:"#475569",marginTop:2}}>Auto: {fmt(tax.grossRentalIncome*0.25)}</div>}
+                  </div>
+                ))}
+              </div>
+              {ts.rentalDeductionMethod==="actual"&&(
+                <FI label="Total Actual Rental Expenses (Rs.)" type="number" value={ts.rentalActualExpenses||""} onChange={v=>sv({rentalActualExpenses:parseFloat(v)||0})} placeholder="Maintenance, repairs, depreciation (IRA 3rd Schedule)"/>
+              )}
+              <div style={{fontSize:11,color:"#34d399",marginTop:4}}>Deduction: {fmt(tax.rentalDeduction)} · Net Assessable Rental: {fmt(tax.netRentalIncome)}</div>
+              <div style={{fontSize:10,color:"#475569",marginTop:4}}>Solar panels on rental property: Capital allowance 33.33%/yr — include in actual expenses above. Residential solar investment: claim under Qualifying Payments.</div>
+            </FormCard>
+          )}
+
+          {/* Business Income Entry */}
+          <FormCard title="🏭 Business Income Entry (s.3 IRA)">
+            <div style={{background:"#070d1a",border:"1px solid #3b82f6",borderRadius:8,padding:"8px",marginBottom:10,fontSize:11,color:"#93c5fd"}}>
+              Any taxpayer (salaried or freelancer) with business/trade/professional income can use this section. Enter <b>annual figures from your accounts</b>. Losses carried forward up to <b>6 years</b> (s.35 IRA).
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px",background:ts.hasBusinessIncome?"#071a07":"#0a0a0a",border:`1px solid ${ts.hasBusinessIncome?"#10b981":"#1e293b"}`,borderRadius:8,marginBottom:10,cursor:"pointer"}}
+              onClick={()=>sv({hasBusinessIncome:!ts.hasBusinessIncome})}>
+              <div style={{width:18,height:18,borderRadius:4,border:`2px solid ${ts.hasBusinessIncome?"#10b981":"#475569"}`,background:ts.hasBusinessIncome?"#10b981":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                {ts.hasBusinessIncome&&<span style={{color:"#fff",fontSize:12,fontWeight:800}}>✓</span>}
+              </div>
+              <div>
+                <div style={{fontSize:12,fontWeight:700,color:ts.hasBusinessIncome?"#34d399":"#64748b"}}>I have Business / Trade / Professional Income to declare</div>
+                <div style={{fontSize:10,color:"#475569"}}>Sole trader · Partnership share · Professional practice · Agriculture · Consulting</div>
+              </div>
+            </div>
+            {ts.hasBusinessIncome&&(
+              <>
+                <FI label="Gross Business Revenue / Turnover (Rs.)" type="number" value={ts.businessGrossRevenue||""} onChange={v=>sv({businessGrossRevenue:parseFloat(v)||0})} placeholder="Total gross income from business for the year"/>
+                <FI label="Total Allowable Business Expenses (Rs.)" type="number" value={ts.businessAllowableExpenses||""} onChange={v=>sv({businessAllowableExpenses:parseFloat(v)||0})} placeholder="Staff, office rent, utilities, transport (allowable per IRA)"/>
+                <FI label="Add back: Total Disallowable Expenses (Rs.)" type="number" value={ts.disallowableExpenses||""} onChange={v=>sv({disallowableExpenses:parseFloat(v)||0})} placeholder="Entertainment >10% limit, private motor, excess depreciation"/>
+                <div style={{background:"#0d1a1a",border:"1px solid #0e7490",borderRadius:8,padding:"8px",marginBottom:10,fontSize:10,color:"#67e8f9"}}>
+                  <b>Disallowable expenses include:</b> Entertainment >10% of business income; private use motor vehicle; book depreciation exceeding IRA 3rd Schedule rates; penalties/fines; non-business capital expenditure. Enter the <b>total add-back amount</b>.
+                </div>
+                <FI label="Prior Year Business Losses — cumulative max 6 Y/A (Rs.)" type="number" value={ts.priorYearBusinessLoss||""} onChange={v=>sv({priorYearBusinessLoss:parseFloat(v)||0})} placeholder="s.35 IRA — total unrelieved loss from up to 6 prior years"/>
+                <div style={{background:"#030d03",border:"1px solid #1a3a1a",borderRadius:8,padding:"10px",marginTop:4}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>Business Income Computation</div>
+                  <TRow l="Gross Business Revenue"            v={fmt(tax.bGross)}                 c="#e2e8f0"/>
+                  <TRow l="Less: Allowable Expenses"          v={"("+fmt(tax.bAllow)+")"}          c="#34d399"/>
+                  <TRow l="Add back: Disallowable Expenses"   v={fmt(tax.bDisall)}                 c="#f59e0b"/>
+                  <div style={{height:"1px",background:"#1e293b",margin:"4px 0"}}/>
+                  <TRow l="Adjusted Profit / (Loss)" v={tax.businessNetProfit<0?"("+fmt(Math.abs(tax.businessNetProfit))+" — LOSS)":fmt(tax.businessNetProfit)} c={tax.businessNetProfit<0?"#f87171":"#fbbf24"} bold/>
+                  {tax.businessLossDeducted>0&&<TRow l="Less: Prior Year Loss (s.35)" v={"("+fmt(tax.businessLossDeducted)+")"} c="#34d399"/>}
+                  <TRow l="Assessable Business Income"        v={fmt(tax.businessAssessable)}       c="#f5d060" bold/>
+                  {tax.currentYearBusinessLoss>0&&(
+                    <div style={{marginTop:6,padding:"6px 8px",background:"#1a0800",borderRadius:6,fontSize:10,color:"#fbbf24"}}>
+                      ⚠️ Current year loss: {fmt(tax.currentYearBusinessLoss)} — carry forward up to 6 years (s.35 IRA).
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </FormCard>
+        </>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          SUB-TAB 3 — 🧮 TAX CALCULATION
+      ════════════════════════════════════════════════════════════════════════ */}
+      {subTab==="tax"&&(
+        <>
+          {/* IRD rules panel */}
+          <div style={{background:isHistorical?"linear-gradient(135deg,#0a1a2a,#0d2040)":"linear-gradient(135deg,#0a1a0a,#0d2210)",borderRadius:12,border:isHistorical?"1px solid #1d4ed8":"1px solid #065f46",padding:12,marginBottom:12}}>
+            <div onClick={()=>setShowNotes(!showNotes)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:isHistorical?"#93c5fd":"#6ee7b7"}}>{isHistorical?"📜 Historical Assessment":"📋 Current Assessment"} · {yr}</div>
+                <div style={{fontSize:10,color:"#475569",marginTop:2}}>Personal Relief: {fmt(cfg.personalRelief)} · QP Cap: {fmt(cfg.qpCap)}</div>
+              </div>
+              <span style={{color:"#475569",fontSize:14}}>{showNotes?"▲":"▼"}</span>
+            </div>
+            {showNotes&&(
+              <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b"}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>Compliance Rules — {yr}</div>
+                {(cfg.notes||[]).map((n,i)=>(
+                  <div key={i} style={{fontSize:11,color:n.startsWith("⚠️")?"#fbbf24":"#94a3b8",padding:"3px 0",lineHeight:1.5}}>• {n}</div>
+                ))}
+                <div style={{marginTop:10,fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:4}}>Tax Slabs — {yr}</div>
+                {cfg.slabs.map((s,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+                    <span style={{fontSize:10,color:"#94a3b8"}}>{s.label}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:"#f5d060"}}>{(s.rate*100).toFixed(0)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Full Tax Computation */}
+          <div style={{...S.card,border:"1px solid #b8960c",background:"linear-gradient(160deg,#0d0d00,#1a1500)"}}>
+            <div style={{...S.cardTitle,color:"#f5d060"}}>🧮 Full Tax Computation</div>
+            <TRow l="1. Total Gross Income"     v={fmt(tax.totalGross)}          c="#e2e8f0"/>
+            {isFreelancer&&!tax.hasManualBusiness&&<TRow l="   Less: Ledger Business Expenses" v={"("+fmt(tax.allowableExpenses)+")"} c="#34d399"/>}
+            {tax.grossRentalIncome>0&&<TRow l={`   Less: Rental Deduction (${tax.rentalMethod==="actual"?"Actual":"25% Std"})`} v={"("+fmt(tax.rentalDeduction)+")"} c="#34d399"/>}
+            {tax.hasManualBusiness&&<TRow l="   Business Assessable Income (manual)" v={fmt(tax.businessAssessable)} c="#f59e0b"/>}
+            {tax.businessLossDeducted>0&&<TRow l="   Less: Prior Year Business Loss (s.35)" v={"("+fmt(tax.businessLossDeducted)+")"} c="#34d399"/>}
+            {tax.exportIncome>0&&<TRow l="   Less: Export/Foreign Income (flat rate)"   v={"("+fmt(tax.exportIncome)+")"} c="#f59e0b"/>}
+            {tax.capitalGainsIncome>0&&<TRow l="   Less: Capital Gains Income (flat rate)" v={"("+fmt(tax.capitalGainsIncome)+")"} c="#a78bfa"/>}
+            <TRow l="2. SL-Source Assessable Income" v={fmt(tax.slIncome)} c="#e2e8f0"/>
+            <TRow l="Less: Personal Relief"    v={"("+fmt(tax.relief)+")"} c="#34d399"/>
+            {!tax.isNRNC&&<TRow l="Less: QP Deductions"     v={"("+fmt(tax.qpRelief)+")"} c="#34d399"/>}
+            <TRow l="3. Taxable Income"           v={fmt(tax.taxable)}  c="#f5d060" bold/>
+            <div style={S.divider}/>
+            <div style={{color:"#64748b",fontSize:11,marginBottom:6}}>Graduated IIT Rates (Part C — Lines 120–160):</div>
+            {tax.breakdown.length===0?<div style={{color:"#475569",fontSize:12,paddingLeft:12,marginBottom:6}}>No tax — income within personal relief threshold</div>:tax.breakdown.map((b,i)=>(
+              <div key={i} style={{...S.row,paddingLeft:12}}><span style={{color:"#94a3b8",fontSize:11}}>{b.label}</span><span style={{color:"#a78bfa",fontSize:11}}>{fmt(b.tax)}</span></div>
+            ))}
+            {tax.exportIncome>0&&<><div style={S.divider}/><TRow l={cfg.exportExempt?"✅ Export/Service Income — EXEMPT for this Y/A":"Export/Service/Foreign Income Tax (15% flat)"} v={cfg.exportExempt?"Rs. 0  (Exempt)":fmt(tax.exportTax)} c={cfg.exportExempt?"#34d399":"#f59e0b"}/></>}
+            {tax.capitalGainsIncome>0&&<TRow l="Capital Gains Tax (10% flat — s.40 IRA)" v={fmt(tax.capitalGainsTax)} c="#a78bfa"/>}
+            {tax.gratuityIncome>0&&<TRow l="Gratuity/Terminal Benefits Tax (s.7 IRA)" v={fmt(tax.gratuityTax)} c="#a78bfa"/>}
+            <div style={S.divider}/>
+            <TRow l="Gross Tax Liability" v={fmt(tax.grossTax)} c="#f87171" bold/>
+            {!isFreelancer&&(
+          <>
+            <TRow l={tax.apitManual>0?"Less: APIT Paid (Manual — T10 Total)":"Less: APIT Paid (Auto-summed from payslip entries)"} v={"("+fmt(tax.apitPaid)+")"} c="#34d399"/>
+            {tax.apitFromEntries>0&&tax.apitManual>0&&tax.apitManual!==tax.apitFromEntries&&(
+              <div style={{fontSize:10,color:"#f59e0b",paddingLeft:8,marginBottom:4}}>
+                ⚠️ Payslip entries total: {fmt(tax.apitFromEntries)} · Manual override: {fmt(tax.apitManual)}
+              </div>
+            )}
+          </>
+        )}
+            {tax.whtTotal>0&&<TRow l="Less: WHT/AIT Credits at Source"    v={"("+fmt(tax.whtTotal)+")"} c="#34d399"/>}
+            <div style={S.divider}/>
+            <TRow l="Balance Tax Payable / (Refund)" v={fmt(tax.netTax)} c={tax.netTax>0?"#f87171":"#34d399"} bold size={15}/>
+            {isFreelancer&&tax.quarterlyTax>0&&(
+              <div style={{marginTop:10,padding:"10px",background:"#1a1000",borderRadius:8,border:"1px solid #f59e0b"}}>
+                <div style={{fontSize:11,color:"#fbbf24",fontWeight:"700",marginBottom:4}}>⏰ Quarterly Advance Tax Schedule</div>
+                {[["Q1 — Aug",0],["Q2 — Nov",1],["Q3 — Feb",2],["Q4 — May",3]].map(([q])=>(
+                  <div key={q} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"#94a3b8"}}><span>{q}</span><span style={{color:"#f59e0b",fontWeight:"700"}}>{fmt(tax.quarterlyTax)}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Penalty Calculator */}
+          <div style={{...S.card,border:"1px solid #ef4444",background:"linear-gradient(160deg,#1a0000,#2d0000)"}}>
+            <div style={{...S.cardTitle,color:"#f87171"}}>⚠️ Late Filing Penalty Calculator</div>
+            <FI label="Your Planned / Actual Filing Date" type="date" value={filingDate} onChange={v=>setFilingDate(v)}/>
+            <div style={{background:"#0d0000",borderRadius:8,padding:"10px 12px"}}>
+              {!filingDate?<div style={{color:"#475569",fontSize:12}}>Enter a filing date to calculate penalties</div>:!penalty.isLate?(
+                <div style={{color:"#34d399",fontSize:12,fontWeight:"700"}}>✓ On time! No penalty. Deadline: {penalty.deadline}</div>
+              ):(
+                <>
+                  <TRow l="Late Fee (5%)"                     v={fmt(penalty.lateFee)} c="#f87171"/>
+                  <TRow l={`Monthly (1% × ${penalty.months}m)`} v={fmt(penalty.monthly)} c="#f87171"/>
+                  <div style={S.divider}/>
+                  <TRow l="Total Penalty"   v={fmt(penalty.total)}             c="#f87171" bold/>
+                  <TRow l="Tax + Penalty"   v={fmt(tax.netTax+penalty.total)}  c="#fbbf24" bold size={14}/>
+                  <div style={{fontSize:10,color:"#f87171",marginTop:6}}>⚠️ File immediately to stop penalty accruing!</div>
+                </>
+              )}
+            </div>
+            <div style={{fontSize:10,color:"#64748b",marginTop:8}}>Penalty: 5% late fee + 1%/month after {penalty.deadline}</div>
+          </div>
+
+          {/* Tax Savings Tips */}
+          {(()=>{
+            const tips=[];
+            const qpRoom=1200000-(data.taxSettings?.qualifyingPayments||0);
+            if(!tax.isNRNC&&qpRoom>0) tips.push({icon:"🛡️",tip:`Qualifying Payments: Claim up to ${fmt(qpRoom)} more via life insurance, EPF top-ups, or approved charity — saving up to ${fmt(qpRoom*0.06)} in tax.`});
+            if(!isFreelancer&&tax.grossTax>0) tips.push({icon:"📊",tip:"As a self-employed person you can deduct all legitimate business expenses before tax — potentially reducing taxable income significantly."});
+            if(isFreelancer&&tax.allowableExpenses===0) tips.push({icon:"🧾",tip:"Record business expenses in the Transaction Ledger — each rupee reduces your taxable income directly."});
+            if(tax.totalGross>5000000) tips.push({icon:"💱",tip:"Export or foreign-source income is taxed at a flat 15% — much lower than the top 36% domestic rate. Segregate these streams."});
+            if(tax.netTax>100000) tips.push({icon:"💡",tip:"Consider spreading deductible expenses to maximise current-year relief. Contact GDP Consultants for a personalised tax planning session."});
+            return(
+              <div style={{...S.card,border:"1px solid #10b981",background:"linear-gradient(160deg,#021a0e,#041a12)",marginBottom:12}}>
+                <div style={{...S.cardTitle,color:"#34d399"}}>💡 Tax Saving Opportunities</div>
+                {tips.length===0?(
+                  <div style={{fontSize:12,color:"#34d399",fontWeight:"700"}}>✅ Great — you are maximising your current reliefs.</div>
+                ):tips.map((t,i)=>(
+                  <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:"1px solid #0a2a1a"}}>
+                    <span style={{fontSize:18,flexShrink:0}}>{t.icon}</span>
+                    <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.6}}>{t.tip}</div>
+                  </div>
+                ))}
+                <a href={`https://wa.me/94${APP_WHATSAPP.replace(/^0/,"")}?text=Hi, I'd like a personalised tax planning session from GDP Consultants.`} target="_blank"
+                  style={{display:"block",marginTop:10,background:"#064e3b",border:"1px solid #10b981",borderRadius:8,padding:"10px",color:"#6ee7b7",fontWeight:"700",fontSize:12,textDecoration:"none",textAlign:"center"}}>
+                  💬 Book a Tax Planning Consultation
+                </a>
               </div>
             );
           })()}
-          <FI label="Month / Period" type="month" value={form.month} onChange={v=>setForm(f=>({...f,month:v}))}/>
-          <FI label="Gross Amount (Rs.)" type="number" value={form.amount} onChange={v=>setForm(f=>({...f,amount:v}))} placeholder="0.00"/>
-          <FI label="Description / Payer" value={form.description} onChange={v=>setForm(f=>({...f,description:v}))} placeholder="e.g. ABC Ltd, Bank of Ceylon FD, Sampath Bank"/>
-          {/* APIT field for employment income categories */}
-          {["Salary / Wages","Bonus / Incentive","Non-Cash Benefits","Overtime Pay","Pension from Employment","ESOP / Share Scheme Gains"].includes(form.category)&&(
-            <FI label="APIT Deducted by Employer (Rs.)" type="number" value={form.apitAmount} onChange={v=>setForm(f=>({...f,apitAmount:v}))} placeholder="From salary slip / T10 certificate"/>
-          )}
-          {/* Gratuity special rate note */}
-          {form.category==="Gratuity / Terminal Benefits"&&(
-            <div style={{background:"#1a0e00",border:"1px solid #92400e",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
-              <div style={{fontSize:10,color:"#fbbf24",fontWeight:700,marginBottom:3}}>⚡ Special Tax Rates Apply (IRA s.7)</div>
-              <div style={{fontSize:9,color:"#94a3b8"}}>First Rs.10,000,000 @ 0% · Next Rs.10,000,000 @ 6% · Balance @ 12%</div>
-              <div style={{fontSize:9,color:"#94a3b8",marginTop:2}}>NOT subject to regular progressive IIT rates</div>
-            </div>
-          )}
-          {/* WHT field for all other categories that have WHT */}
-          {INCOME_CAT_META[form.category]?.wht && form.category!=="Salary / Wages" && form.category!=="Bonus / Incentive" && form.category!=="Non-Cash Benefits" &&(
-            <FI label={`WHT / AIT Deducted at Source (Rs.) [${INCOME_CAT_META[form.category].wht}]`} type="number" value={form.apitAmount} onChange={v=>setForm(f=>({...f,apitAmount:v}))} placeholder="From WHT certificate / bank statement"/>
-          )}
-          {/* Director's fees WHT */}
-          {(form.category==="Director's Fees"||form.category==="Commission Income"||form.category==="Consulting Fees"||form.category==="Freelance / Contract Fees")&&!INCOME_CAT_META[form.category]?.wht&&(
-            <FI label="WHT Deducted (Rs.)" type="number" value={form.apitAmount} onChange={v=>setForm(f=>({...f,apitAmount:v}))} placeholder="5% if payer is institution"/>
-          )}
-          <button style={S.submitBtn} onClick={add}>✓ Save Income Entry</button>
-        </FormCard>
+        </>
       )}
 
-      {/* Freelancer Expenses */}
-      {isFreelancer&&(data.expenseEntries||[]).length>0&&(
-        <div style={S.card}>
-          <div style={S.cardTitle}>🧾 Allowable Business Expenses</div>
-          {Object.entries(tax.expenseBreakdown).map(([cat,amt])=>(
-            <div key={cat} style={S.row}><span style={{color:"#94a3b8",fontSize:12}}>{cat}</span><span style={{color:"#34d399",fontSize:12,fontWeight:"600"}}>{fmt(amt)}</span></div>
-          ))}
-          <div style={S.divider}/>
-          <TRow l="Total Deductible Expenses" v={fmt(tax.allowableExpenses)} c="#34d399" bold/>
-        </div>
-      )}
+      {/* ════════════════════════════════════════════════════════════════════════
+          SUB-TAB 4 — 📋 IRD GUIDE
+      ════════════════════════════════════════════════════════════════════════ */}
+      {subTab==="guide"&&(
+        <>
+          <IncomeSourcesGuide key={activeYear} activeYear={activeYear} isFreelancer={isFreelancer}/>
 
-      {incomeCats.map(cat=>{
-        const rows=data.incomeEntries.filter(e=>e.category===cat);
-        if(!rows.length)return null;
-        return(
-          <div key={cat} style={S.card}>
-            <div style={S.cardTitle}>{catIcon(cat)} {cat}</div>
-            {rows.sort((a,b)=>b.month.localeCompare(a.month)).map(e=>(
-              <div key={e.id} style={S.txnRow}>
-                <div style={{flex:1}}><div style={S.txnDesc}>{e.description}</div><div style={S.txnDate}>{e.month}{e.apitAmount?` · APIT: ${fmtC(e.apitAmount)}`:""}</div></div>
-                <div style={{textAlign:"right"}}><div style={{color:"#34d399",fontWeight:"700",fontSize:13}}>{fmt(e.amount)}</div><button style={S.delBtn} onClick={()=>del(e.id)}>🗑</button></div>
-              </div>
-            ))}
-          </div>
-        );
-      })}
-      {data.incomeEntries.length===0&&<Empty icon="📥" text="No income entries yet"/>}
-    </div>
-  );
-}
-
-// ─── TAX PAGE ──────────────────────────────────────────────────────────────────
-function TaxPage({data,update,tax,profile,activeYear}){
-  const ts=data.taxSettings;
-  const sv=p=>update({taxSettings:{...ts,...p}});
-  const [filingDate,setFilingDate]=useState("");
-  const [showNotes,setShowNotes]=useState(false);
-  const penalty=computePenalty(tax.netTax,filingDate);
-  const isFreelancer=profile?.employmentType==="freelancer";
-  const cfg=tax.cfg||getTaxCfg(activeYear);
-  const yr=activeYear||DEFAULT_YEAR;
-
-  // Year-change hint when viewing historical years
-  const isHistorical=["2022/2023","2023/2024","2024/2025"].includes(yr);
-
-  return(
-    <div style={S.page}>
-      <div style={S.pageTitle}>📅 Tax Year — {yr}</div>
-      <div style={{fontSize:10,color:"#64748b",marginBottom:10}}>{cfg.act} · {isFreelancer?"Freelancer / Self-Employed Rules":"Salaried Employee Rules"}</div>
-
-      {/* Year-specific IRD rules panel */}
-      <div style={{background:isHistorical?"linear-gradient(135deg,#0a1a2a,#0d2040)":"linear-gradient(135deg,#0a1a0a,#0d2210)",borderRadius:12,border:isHistorical?"1px solid #1d4ed8":"1px solid #065f46",padding:12,marginBottom:12}}>
-        <div onClick={()=>setShowNotes(!showNotes)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
-          <div>
-            <div style={{fontSize:11,fontWeight:700,color:isHistorical?"#93c5fd":"#6ee7b7"}}>{isHistorical?"📜 Historical Assessment":"📋 Current Assessment"} · {yr}</div>
-            <div style={{fontSize:10,color:"#475569",marginTop:2}}>Personal Relief: {fmt(cfg.personalRelief)} · QP Cap: {fmt(cfg.qpCap)}</div>
-          </div>
-          <span style={{color:"#475569",fontSize:14}}>{showNotes?"▲":"▼"}</span>
-        </div>
-        {showNotes&&(
-          <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #1e293b"}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>Compliance Rules & Notes — {yr}</div>
-            {(cfg.notes||[]).map((n,i)=>(
-              <div key={i} style={{fontSize:11,color:n.startsWith("⚠️")?"#fbbf24":"#94a3b8",padding:"3px 0",lineHeight:1.5}}>• {n}</div>
-            ))}
-            {/* Tax slabs table */}
-            <div style={{marginTop:10,fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:4}}>Tax Slabs — {yr}</div>
-            {cfg.slabs.map((s,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
-                <span style={{fontSize:10,color:"#94a3b8"}}>{s.label}</span>
-                <span style={{fontSize:10,fontWeight:700,color:"#f5d060"}}>{(s.rate*100).toFixed(0)}%</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Employment type badge */}
-      <div style={{...S.card,border:"1px solid "+(isFreelancer?"#f59e0b":"#1d4ed8"),background:isFreelancer?"linear-gradient(135deg,#1a1000,#2a1800)":"linear-gradient(135deg,#0a1a3a,#0f2040)",marginBottom:12}}>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <span style={{fontSize:28}}>{isFreelancer?"💻":"🏢"}</span>
-          <div>
-            <div style={{fontSize:14,fontWeight:"800",color:isFreelancer?"#fbbf24":"#93c5fd"}}>{isFreelancer?"Freelancer / Self-Employed":"Salaried Employee"}</div>
-            <div style={{fontSize:11,color:"#64748b"}}>{isFreelancer?"Business income rules · Expense deductions apply · Quarterly advance tax":"Employment income · APIT deducted at source · Standard reliefs"}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Residency */}
-      <div style={S.card}>
-        <div style={S.cardTitle}>🌍 Residency Status</div>
-        {RESIDENCY_OPTS.map(o=>(
-          <div key={o.v} onClick={()=>sv({residency:o.v})} style={{...S.resOpt,...(ts.residency===o.v?S.resOptA:{})}}>
-            <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-              <div style={{width:14,height:14,borderRadius:"50%",border:"2px solid "+(ts.residency===o.v?"#b8960c":"#334155"),background:ts.residency===o.v?"#b8960c":"transparent",flexShrink:0,marginTop:2}}/>
-              <div><div style={{fontSize:12,fontWeight:"600",color:ts.residency===o.v?"#f5d060":"#e2e8f0"}}>{o.l}</div><div style={{fontSize:10,color:"#64748b"}}>{o.desc}</div></div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Deductions */}
-      <FormCard title="🧾 Reliefs & Deductions">
-        <div style={{background:"#0a1a0a",border:"1px solid #10b981",borderRadius:8,padding:"8px",marginBottom:10,fontSize:11,color:"#6ee7b7"}}>Personal Relief: <b>{fmt(tax.relief)}</b>{tax.isNRNC?" (NRNC — No relief applies)":""}</div>
-        {!tax.isNRNC&&(
-          <>
-            <FI label="Qualifying Payments (Rs.)" type="number" value={ts.qualifyingPayments||""} onChange={v=>sv({qualifyingPayments:parseFloat(v)||0})} placeholder="Max Rs.1,200,000"/>
-            <div style={{fontSize:10,color:"#64748b",marginBottom:8}}>Life insurance, charity donations, unit trust investments, voluntary EPF/ETF. Cap: Rs.1,200,000</div>
-            <div style={{fontSize:11,color:"#34d399",marginBottom:10}}>Relief applied: {fmt(tax.qpRelief)}</div>
-          </>
-        )}
-        {!isFreelancer&&<FI label="APIT Paid at Source (Rs.)" type="number" value={ts.apitPaid||""} onChange={v=>sv({apitPaid:parseFloat(v)||0})} placeholder="Total from salary slips"/>}
-        {isFreelancer&&<div style={{background:"#1a1000",border:"1px solid #f59e0b",borderRadius:8,padding:"8px",marginBottom:10,fontSize:11,color:"#fbbf24"}}>💻 Freelancers: Enter all business expenses in the Transaction Ledger and mark them as "Business Expense (Tax Deductible)" — they will be auto-deducted from your taxable income.</div>}
-      </FormCard>
-
-      {/* Full Tax Computation */}
-      <div style={{...S.card,border:"1px solid #b8960c",background:"linear-gradient(160deg,#0d0d00,#1a1500)"}}>
-        <div style={{...S.cardTitle,color:"#f5d060"}}>🧮 Full Tax Computation</div>
-        <TRow l="1. Total Gross Income"     v={fmt(tax.totalGross)}          c="#e2e8f0"/>
-        {isFreelancer&&<TRow l="   Less: Business Expenses" v={"("+fmt(tax.allowableExpenses)+")"} c="#34d399"/>}
-        {isFreelancer&&<TRow l="2. Net Business Income"     v={fmt(tax.netIncome)}  c="#e2e8f0"/>}
-        {tax.exportIncome>0&&<TRow l="   Less: Export/Foreign Income"   v={"("+fmt(tax.exportIncome)+")"} c="#f59e0b"/>}
-        {tax.capitalGainsIncome>0&&<TRow l="   Less: Capital Gains Income" v={"("+fmt(tax.capitalGainsIncome)+")"} c="#a78bfa"/>}
-        <TRow l={isFreelancer?"3. SL-Source Net Income":"2. SL-Source Income"} v={fmt(tax.slIncome-(isFreelancer?tax.allowableExpenses:0))} c="#e2e8f0"/>
-        <TRow l="Less: Personal Relief"    v={"("+fmt(tax.relief)+")"} c="#34d399"/>
-        {!tax.isNRNC&&<TRow l="Less: QP Deductions"     v={"("+fmt(tax.qpRelief)+")"} c="#34d399"/>}
-        <TRow l="Taxable Income"           v={fmt(tax.taxable)}  c="#f5d060" bold/>
-        <div style={S.divider}/>
-        <div style={{color:"#64748b",fontSize:11,marginBottom:6}}>Graduated IIT Rates:</div>
-        {tax.breakdown.length===0?<div style={{color:"#475569",fontSize:12,paddingLeft:12,marginBottom:6}}>No tax — income within personal relief threshold</div>:tax.breakdown.map((b,i)=>(
-          <div key={i} style={{...S.row,paddingLeft:12}}><span style={{color:"#94a3b8",fontSize:11}}>{b.label}</span><span style={{color:"#a78bfa",fontSize:11}}>{fmt(b.tax)}</span></div>
-        ))}
-        {tax.exportIncome>0&&<><div style={S.divider}/><TRow l={cfg.exportExempt?"✅ Export/Service Income — EXEMPT for this Y/A":"Export/Service/Foreign Income Tax (15% flat)"} v={cfg.exportExempt?"Rs. 0  (Exempt)":fmt(tax.exportTax)} c={cfg.exportExempt?"#34d399":"#f59e0b"}/></>}
-        {tax.capitalGainsIncome>0&&<TRow l="Capital Gains Tax (10% flat)" v={fmt(tax.capitalGainsTax)} c="#a78bfa"/>}
-        <div style={S.divider}/>
-        <TRow l="Gross Tax Liability" v={fmt(tax.grossTax)} c="#f87171" bold/>
-        {!isFreelancer&&<TRow l="Less: APIT Paid"    v={"("+fmt(tax.apitPaid)+")"} c="#34d399"/>}
-        <div style={S.divider}/>
-        <TRow l="Balance Tax Payable / (Refund)" v={fmt(tax.netTax)} c={tax.netTax>0?"#f87171":"#34d399"} bold size={15}/>
-        {isFreelancer&&tax.quarterlyTax>0&&(
-          <div style={{marginTop:10,padding:"10px",background:"#1a1000",borderRadius:8,border:"1px solid #f59e0b"}}>
-            <div style={{fontSize:11,color:"#fbbf24",fontWeight:"700",marginBottom:4}}>⏰ Quarterly Advance Tax Schedule</div>
-            {[["Q1 — Aug 2025",0],["Q2 — Nov 2025",1],["Q3 — Feb 2026",2],["Q4 — May 2026",3]].map(([q])=>(
-              <div key={q} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"#94a3b8"}}><span>{q}</span><span style={{color:"#f59e0b",fontWeight:"700"}}>{fmt(tax.quarterlyTax)}</span></div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Penalty Calculator */}
-      <div style={{...S.card,border:"1px solid #ef4444",background:"linear-gradient(160deg,#1a0000,#2d0000)"}}>
-        <div style={{...S.cardTitle,color:"#f87171"}}>⚠️ Late Filing Penalty Calculator</div>
-        <FI label="Your Planned / Actual Filing Date" type="date" value={filingDate} onChange={v=>setFilingDate(v)}/>
-        <div style={{background:"#0d0000",borderRadius:8,padding:"10px 12px"}}>
-          {!filingDate?<div style={{color:"#475569",fontSize:12}}>Enter a filing date to calculate penalties</div>:!penalty.isLate?(
-            <div style={{color:"#34d399",fontSize:12,fontWeight:"700"}}>✓ On time! No penalty. Deadline: {FILING_DEADLINE}</div>
-          ):(
-            <>
-              <TRow l={`Late Fee (5%)`}                    v={fmt(penalty.lateFee)} c="#f87171"/>
-              <TRow l={`Monthly (1% × ${penalty.months}m)`} v={fmt(penalty.monthly)} c="#f87171"/>
-              <div style={S.divider}/>
-              <TRow l="Total Penalty"   v={fmt(penalty.total)}             c="#f87171" bold/>
-              <TRow l="Tax + Penalty"   v={fmt(tax.netTax+penalty.total)}  c="#fbbf24" bold size={14}/>
-              <div style={{fontSize:10,color:"#f87171",marginTop:6}}>⚠️ File immediately to stop penalty accruing!</div>
-            </>
-          )}
-        </div>
-        <div style={{fontSize:10,color:"#64748b",marginTop:8}}>Penalty: 5% late fee + 1%/month after {FILING_DEADLINE}</div>
-      </div>
-
-      {/* Tax Savings Tips */}
-      {(()=>{
-        const tips=[];
-        const qpUsed=tax.isNRNC?1200000:(data.taxSettings?.qualifyingPayments||0);
-        const qpRoom=1200000-qpUsed;
-        if(!tax.isNRNC&&qpRoom>0) tips.push({icon:"🛡️",tip:`Qualifying Payments: You can still claim up to ${fmt(qpRoom)} more via life insurance, EPF top-ups, or approved charity donations — saving up to ${fmt(qpRoom*0.06)} in tax.`});
-        if(!isFreelancer&&tax.grossTax>0) tips.push({icon:"📊",tip:"Convert to freelancer/self-employed status to deduct all legitimate business expenses before tax — potentially reducing taxable income significantly."});
-        if(isFreelancer&&tax.allowableExpenses===0) tips.push({icon:"🧾",tip:"Record your business expenses (internet, equipment, software, travel) in the Transaction Ledger — each rupee reduces your taxable income directly."});
-        if(tax.totalGross>5000000) tips.push({icon:"💱",tip:"If you have export or foreign-source income, it is taxed at a flat 15% rate — much lower than the top 36% domestic rate. Segregate these income streams."});
-        if(tax.netTax>100000) tips.push({icon:"💡",tip:`Consider spreading large deductible expenses to maximise your current-year relief. Contact GDP Consultants for a personalised tax planning session.`});
-        return(
-          <div style={{...S.card,border:"1px solid #10b981",background:"linear-gradient(160deg,#021a0e,#041a12)",marginBottom:12}}>
-            <div style={{...S.cardTitle,color:"#34d399"}}>💡 Tax Saving Opportunities</div>
-            {tips.length===0?(
-              <div style={{fontSize:12,color:"#34d399",fontWeight:"700"}}>✅ Great — you are maximising your current reliefs.</div>
-            ):tips.map((t,i)=>(
-              <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:"1px solid #0a2a1a"}}>
-                <span style={{fontSize:18,flexShrink:0}}>{t.icon}</span>
-                <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.6}}>{t.tip}</div>
-              </div>
-            ))}
-            <a href={`https://wa.me/94${APP_WHATSAPP.replace(/^0/,"")}?text=Hi, I'd like a personalised tax planning session from GDP Consultants.`} target="_blank"
-              style={{display:"block",marginTop:10,background:"#064e3b",border:"1px solid #10b981",borderRadius:8,padding:"10px",color:"#6ee7b7",fontWeight:"700",fontSize:12,textDecoration:"none",textAlign:"center"}}>
-              💬 Book a Tax Planning Consultation
-            </a>
-          </div>
-        );
-      })()}
-
-      {/* ── IIT Tax Rates Reference — All Years ── */}
-      <div style={{...S.card,background:"#050c18",border:"1px solid #1e3a5f"}}>
-        <div style={{...S.cardTitle,color:"#b8960c"}}>📊 IIT Tax Rates — All Assessment Years</div>
-        <div style={{fontSize:10,color:"#475569",marginBottom:10}}>Source: IRD Sri Lanka · ird.gov.lk · IRA No.24/2017 & Amendments</div>
-
-        {/* Year toggle */}
-        {[["2022/2023","2022/2023"],["2023/2024","2023/2024"],["2024/2025","2024/2025"],["2025/2026","2025/2026"],["2026/2027","2026/2027"]].map(([yk,lbl])=>{
-          const c=TAX_YEAR_CONFIG[yk];
-          const isCurrent=yk===yr;
-          return(
-            <div key={yk} style={{marginBottom:10,border:`1px solid ${isCurrent?"#b8960c":"#1e293b"}`,borderRadius:10,overflow:"hidden"}}>
-              <div style={{background:isCurrent?"linear-gradient(135deg,#1a1200,#2d1e00)":"#07101a",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <span style={{fontSize:12,fontWeight:800,color:isCurrent?"#f5d060":"#93c5fd"}}>{lbl}</span>
-                  {isCurrent&&<span style={{fontSize:9,background:"#b8960c",color:"#fff",padding:"1px 5px",borderRadius:3,marginLeft:6,fontWeight:700}}>CURRENT</span>}
-                  {c.splitYear&&<span style={{fontSize:9,background:"#7c3aed",color:"#fff",padding:"1px 5px",borderRadius:3,marginLeft:6,fontWeight:700}}>SPLIT YEAR</span>}
-                  {yk==="2026/2027"&&<span style={{fontSize:9,background:"#475569",color:"#fff",padding:"1px 5px",borderRadius:3,marginLeft:6,fontWeight:700}}>PROVISIONAL</span>}
-                </div>
-                <span style={{fontSize:10,color:"#475569"}}>Relief: <b style={{color:"#34d399"}}>Rs.{(c.personalRelief/1e6).toFixed(1)}M</b></span>
-              </div>
-              <div style={{padding:"8px 12px",background:"#040a14"}}>
-                <div style={{fontSize:10,color:"#64748b",marginBottom:5}}>{c.act}</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"2px 16px"}}>
-                  {c.slabs.map((s,i)=>(
-                    <React.Fragment key={i}>
-                      <span style={{fontSize:10,color:"#94a3b8"}}>{s.label}</span>
-                      <span style={{fontSize:10,fontWeight:700,color:["#10b981","#4ade80","#fbbf24","#f97316","#ef4444","#dc2626"][i]||"#dc2626",textAlign:"right"}}>{(s.rate*100).toFixed(0)}%</span>
-                    </React.Fragment>
-                  ))}
-                  <span style={{fontSize:10,color:"#94a3b8"}}>Export/Foreign Services</span>
-                  <span style={{fontSize:10,fontWeight:700,color:c.exportExempt?"#34d399":"#a78bfa",textAlign:"right"}}>{c.exportExempt?"EXEMPT ✅":"15% flat"}</span>
-                  <span style={{fontSize:10,color:"#94a3b8"}}>Capital Gains (investment assets)</span>
-                  <span style={{fontSize:10,fontWeight:700,color:"#c4b5fd",textAlign:"right"}}>10% flat</span>
-                  <span style={{fontSize:10,color:"#94a3b8"}}>WHT on Dividends</span>
-                  <span style={{fontSize:10,fontWeight:700,color:"#60a5fa",textAlign:"right"}}>{c.aitDividendRate?((c.aitDividendRate*100).toFixed(0)+"%"):"15%"}</span>
-                  <span style={{fontSize:10,color:"#94a3b8"}}>AIT on FD/Interest</span>
-                  <span style={{fontSize:10,fontWeight:700,color:"#60a5fa",textAlign:"right"}}>{(c.aitRate*100).toFixed(0)}%{yk==="2025/2026"||yk==="2026/2027"?" ⬆️":""}</span>
-                </div>
-                {c.splitYear&&(
-                  <div style={{marginTop:6,padding:"5px 8px",background:"#12041a",border:"1px solid #6d28d9",borderRadius:6}}>
-                    <div style={{fontSize:9,color:"#a78bfa",fontWeight:700,marginBottom:3}}>PERIOD 1 (01.04.2022 – 31.12.2022) — IRA No.24/2017 (9-month period):</div>
-                    {(c.slabsOld||[]).map((s,i)=>(
-                      <div key={i} style={{display:"flex",justifyContent:"space-between"}}>
-                        <span style={{fontSize:9,color:"#64748b"}}>{s.label}</span>
-                        <span style={{fontSize:9,fontWeight:700,color:"#c4b5fd"}}>{(s.rate*100).toFixed(0)}%</span>
-                      </div>
-                    ))}
-                    <div style={{fontSize:9,color:"#f59e0b",fontWeight:700,marginTop:3}}>Personal Relief Rs.2,250,000 + Expenditure Relief Rs.900,000 (9-month period) = Rs.3,150,000 total</div><div style={{fontSize:9,color:"#6d28d9",marginTop:1}}>APIT threshold: Rs.250,000/month | AIT on interest: 6% | WHT on dividends: 12%</div>
+          {/* IIT Tax Rates Reference — All Years */}
+          <div style={{...S.card,background:"#050c18",border:"1px solid #1e3a5f"}}>
+            <div style={{...S.cardTitle,color:"#b8960c"}}>📊 IIT Tax Rates — All Assessment Years</div>
+            <div style={{fontSize:10,color:"#475569",marginBottom:10}}>Source: IRD Sri Lanka · ird.gov.lk · IRA No.24/2017 & Amendments</div>
+            {[["2022/2023","2022/2023"],["2023/2024","2023/2024"],["2024/2025","2024/2025"],["2025/2026","2025/2026"],["2026/2027","2026/2027"]].map(([yk,lbl])=>{
+              const c=TAX_YEAR_CONFIG[yk];
+              const isCurrent=yk===yr;
+              return(
+                <div key={yk} style={{marginBottom:10,border:`1px solid ${isCurrent?"#b8960c":"#1e293b"}`,borderRadius:10,overflow:"hidden"}}>
+                  <div style={{background:isCurrent?"linear-gradient(135deg,#1a1200,#2d1e00)":"#07101a",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <span style={{fontSize:12,fontWeight:800,color:isCurrent?"#f5d060":"#93c5fd"}}>{lbl}</span>
+                      {isCurrent&&<span style={{fontSize:9,background:"#b8960c",color:"#fff",padding:"1px 5px",borderRadius:3,marginLeft:6,fontWeight:700}}>CURRENT</span>}
+                      {c.splitYear&&<span style={{fontSize:9,background:"#7c3aed",color:"#fff",padding:"1px 5px",borderRadius:3,marginLeft:6,fontWeight:700}}>SPLIT YEAR</span>}
+                      {yk==="2026/2027"&&<span style={{fontSize:9,background:"#475569",color:"#fff",padding:"1px 5px",borderRadius:3,marginLeft:6,fontWeight:700}}>PROVISIONAL</span>}
+                    </div>
+                    <span style={{fontSize:10,color:"#475569"}}>Relief: <b style={{color:"#34d399"}}>Rs.{(c.personalRelief/1e6).toFixed(1)}M</b></span>
                   </div>
-                )}
-              </div>
+                  <div style={{padding:"8px 12px",background:"#040a14"}}>
+                    <div style={{fontSize:10,color:"#64748b",marginBottom:5}}>{c.act}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"2px 16px"}}>
+                      {c.slabs.map((s,i)=>(
+                        <React.Fragment key={i}>
+                          <span style={{fontSize:10,color:"#94a3b8"}}>{s.label}</span>
+                          <span style={{fontSize:10,fontWeight:700,color:["#10b981","#4ade80","#fbbf24","#f97316","#ef4444","#dc2626"][i]||"#dc2626",textAlign:"right"}}>{(s.rate*100).toFixed(0)}%</span>
+                        </React.Fragment>
+                      ))}
+                      <span style={{fontSize:10,color:"#94a3b8"}}>Export/Foreign Services</span>
+                      <span style={{fontSize:10,fontWeight:700,color:c.exportExempt?"#34d399":"#a78bfa",textAlign:"right"}}>{c.exportExempt?"EXEMPT ✅":"15% flat"}</span>
+                      <span style={{fontSize:10,color:"#94a3b8"}}>Capital Gains</span>
+                      <span style={{fontSize:10,fontWeight:700,color:"#c4b5fd",textAlign:"right"}}>10% flat</span>
+                      <span style={{fontSize:10,color:"#94a3b8"}}>AIT on FD Interest</span>
+                      <span style={{fontSize:10,fontWeight:700,color:"#60a5fa",textAlign:"right"}}>{(c.aitRate*100).toFixed(0)}%{yk==="2025/2026"||yk==="2026/2027"?" ⬆️":""}</span>
+                    </div>
+                    {c.splitYear&&(
+                      <div style={{marginTop:6,padding:"5px 8px",background:"#12041a",border:"1px solid #6d28d9",borderRadius:6}}>
+                        <div style={{fontSize:9,color:"#a78bfa",fontWeight:700,marginBottom:3}}>PERIOD 1 (01.04.2022 – 31.12.2022):</div>
+                        {(c.slabsOld||[]).map((s,i)=>(
+                          <div key={i} style={{display:"flex",justifyContent:"space-between"}}>
+                            <span style={{fontSize:9,color:"#64748b"}}>{s.label}</span>
+                            <span style={{fontSize:9,fontWeight:700,color:"#c4b5fd"}}>{(s.rate*100).toFixed(0)}%</span>
+                          </div>
+                        ))}
+                        <div style={{fontSize:9,color:"#f59e0b",fontWeight:700,marginTop:3}}>Personal Relief Rs.2,250,000 + Expenditure Relief Rs.900,000 (9-month) = Rs.3,150,000 total</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {/* WHT Summary */}
+            <div style={{marginTop:8,padding:"10px",background:"#07101a",borderRadius:8,border:"1px solid #1e3a5f"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#93c5fd",marginBottom:6}}>📋 WHT / AIT Rates at Source (Creditable against IIT)</div>
+              {[
+                ["Dividends","15%","From 01.01.2023 onwards","s.21 IRA — AIT deducted by company"],
+                ["FD / Bank Interest","5%","2022/23 P2 to 2024/25","AIT — creditable against final IIT"],
+                ["FD / Bank Interest","10% ⬆️","2025/26 onwards","Increased by Act No.02/2025"],
+                ["Rental Income","10%","All years","AIT if payer is institution"],
+                ["Service Fees / Freelance","5%","All years","WHT if payer is institution & >Rs.150k/mo"],
+                ["IT/Service Exports","EXEMPT ✅","Y/A 2022/23–2024/25","s.9(1)(q) IRA — exemption removed by Act No.02/2025"],
+                ["IT/Service Exports","15% flat","From 01.04.2025","Act No.02/2025 — now taxed at 15% flat"],
+                ["Director's Fees","5%","All years","WHT deducted by company"],
+                ["Royalties","10%","All years","WHT deducted at source"],
+              ].map(([inc,rate,period,note])=>(
+                <div key={inc+rate} style={{marginBottom:6,paddingBottom:6,borderBottom:"1px solid #0f1e2e"}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:11,color:"#cbd5e1"}}>{inc}</span>
+                    <span style={{fontSize:11,fontWeight:700,color:"#f5d060"}}>{rate}</span>
+                  </div>
+                  <div style={{fontSize:9,color:"#475569"}}>{period} · {note}</div>
+                </div>
+              ))}
             </div>
-          );
-        })}
-
-        {/* WHT Summary Table */}
-        <div style={{marginTop:8,padding:"10px",background:"#07101a",borderRadius:8,border:"1px solid #1e3a5f"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#93c5fd",marginBottom:6}}>📋 WHT / AIT Rates at Source (Creditable against IIT)</div>
-          {[
-            ["Dividends","12%","2022/23 Period 1 (Apr–Dec 2022)","WHT on dividends before Amendment 45/2022"],
-            ["Dividends","15%","From 01.01.2023 onwards","Final withholding — Act 45/2022 | no further tax liability"],
-            ["FD / Bank Interest","6%","2022/23 Period 1 (Apr–Dec 2022)","AIT on interest before Amendment 45/2022"],
-            ["FD / Bank Interest","5%","2022/23 P2 to 2024/25","AIT mandatory from 01.01.2023 — creditable against final IIT"],
-            ["FD / Bank Interest","10% ⬆️","2025/26 onwards","Increased by Act No.02/2025"],
-            ["Rental Income","10%","All years","AIT if payer is institution"],
-            ["Service Fees / Freelance","5%","All years","WHT if payer is institution & >Rs.150k/mo"],
-            ["IT/Service Exports","EXEMPT ✅","Y/A 2022/23, 2023/24, 2024/25","Income exempt under s.9(1)(q) IRA — exemption removed by Act No.02/2025"],
-            ["IT/Service Exports","15% flat","From 01.04.2025 (Y/A 2025/26 onwards)","Exemption REMOVED — now taxed at 15% flat max rate | Act No.02/2025"],
-            ["Foreign Sourced Income","15% flat","From 01.04.2025 (Y/A 2025/26 onwards)","Exemption REMOVED — income remitted via bank from abroad | Act No.02/2025"],
-            ["Director's Fees","5%","All years","WHT deducted by company"],
-            ["Royalties","10%","All years","WHT deducted at source"],
-          ].map(([inc,rate,period,note])=>(
-            <div key={inc} style={{marginBottom:6,paddingBottom:6,borderBottom:"1px solid #0f1e2e"}}>
-              <div style={{display:"flex",justifyContent:"space-between"}}>
-                <span style={{fontSize:11,color:"#cbd5e1"}}>{inc}</span>
-                <span style={{fontSize:11,fontWeight:700,color:"#f5d060"}}>{rate}</span>
-              </div>
-              <div style={{fontSize:9,color:"#475569"}}>{period} · {note}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
+
 
 // ─── REPORTS PAGE ──────────────────────────────────────────────────────────────
 function ReportsPage({data,tax,cashBalance,totalBankBal,profile,bankBalance,activeYear}){
@@ -3179,6 +3406,7 @@ function ReportsPage({data,tax,cashBalance,totalBankBal,profile,bankBalance,acti
   const [downloading,setDownloading]=useState(false);
   const [allYearsData,setAllYearsData]=useState({});
   const isFreelancer=profile?.employmentType==="freelancer";
+  const cfg=tax.cfg||getTaxCfg(activeYear||DEFAULT_YEAR);
 
   // Load all years for comparison when comparison tab opened
   useEffect(()=>{
@@ -3203,86 +3431,250 @@ function ReportsPage({data,tax,cashBalance,totalBankBal,profile,bankBalance,acti
 
   const downloadReport=()=>{
     setDownloading(true);
-    const incRows=Object.entries(tax.incByCat).map(([c,a])=>`<tr><td>${c}</td><td class="amt">${fmt(a)}</td></tr>`).join("");
-    const mRows=mList.map(m=>`<tr><td>${m}</td><td class="g">${fmt(months[m].r)}</td><td class="r">${fmt(months[m].p)}</td><td class="${months[m].r-months[m].p>=0?"g":"r"}">${fmt(months[m].r-months[m].p)}</td></tr>`).join("");
-    const expRows=isFreelancer?Object.entries(tax.expenseBreakdown).map(([c,a])=>`<tr><td>${c}</td><td class="amt">${fmt(a)}</td></tr>`).join(""):"";
-    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${APP_NAME} — Tax Report ${TAX_YEAR}</title>
+    // ── Year-specific values ─────────────────────────────────────────────────
+    const yrLabel    = yearLabel(activeYear||DEFAULT_YEAR);
+    const filingDL   = yrLabel.filing;
+    const yrPeriod   = yrLabel.period;
+    const actName    = cfg.act||"IRA No.24/2017 & Amendments";
+
+    // ── PART A — Income lines ────────────────────────────────────────────────
+    const employmentCats  = ["Salary / Wages","Director's Fees","Bonus / Incentive","Overtime Pay","Non-Cash Benefits","Gratuity / Terminal Benefits","Pension from Employment","ESOP / Share Scheme Gains"];
+    const businessCats    = ["Freelance / Contract Fees","Business / Trade Income","Professional Practice Income","Commission Income","Consulting Fees","Agriculture Income","Partnership Share of Profit"];
+    const investmentCats  = ["Rental Income","Dividends","Interest / FD Income","Royalties","Annuity / Private Pension"];
+    const specialCats     = ["Capital Gains","Export Services (15%)","Foreign Remittance (15%)","Export/Foreign"];
+    const otherCats       = ["Lottery / Prize Winnings","Casual / Irregular Income","Other Income"];
+
+    const sumCats = (cats) => cats.reduce((s,c)=>(s + (tax.incByCat[c]||0)), 0);
+    const lineA10 = sumCats(employmentCats);
+    const lineA20 = sumCats(businessCats) + (tax.hasManualBusiness ? tax.businessAssessable : 0);
+    const lineA30 = sumCats(investmentCats); // gross rental before deduction
+    const lineA40 = sumCats(otherCats);
+    const lineA50 = sumCats(specialCats);   // exempt / special-rate
+    const totalPartA = lineA10 + lineA20 + lineA30 + lineA40 + lineA50;
+
+    // Income row helper
+    const incRow = (lbl,amt,sub="") => amt>0 ? `<tr><td style="padding-left:16px">${lbl}</td><td class="amt">${fmt(amt)}</td>${sub?`<td style="font-size:10px;color:#64748b">${sub}</td>`:"<td></td>"}</tr>` : "";
+
+    // PART A detail rows
+    const partARows = [
+      incRow("Employment Income (salaries, ESOP, pension, gratuity)",lineA10,"s.2 IRA"),
+      incRow("Business / Trade / Professional Income",lineA20,"s.3 IRA"),
+      incRow("Investment Income (rent, dividends, interest, royalties)",lineA30,"s.4 IRA"),
+      incRow("Other Income",lineA40,"s.6 IRA"),
+      incRow("Exempt / Special Rate Income (export/CGT)",lineA50,"s.40, s.59 IRA"),
+    ].filter(Boolean).join("") || `<tr><td colspan="3" style="color:#94a3b8;text-align:center;padding:10px">No income recorded</td></tr>`;
+
+    // PART B — Reliefs
+    const lineB60 = tax.rentalDeduction;
+    const lineB70 = tax.qpRelief;
+    const lineB80 = tax.relief;
+    const lineB90 = tax.businessLossDeducted;
+    const lineB100= 0; // additional prior year loss not yet offset
+    const totalPartB = lineB60 + lineB70 + lineB80 + lineB90 + lineB100;
+
+    // PART C — Tax computation
+    const lineC120 = Math.max(0, totalPartA - lineA50 - lineB60 - lineB70 - lineB80 - lineB90);
+    const lineC130 = tax.grossTax - tax.exportTax - tax.capitalGainsTax - tax.gratuityTax;
+    const lineC140 = tax.exportTax;
+    const lineC150 = tax.capitalGainsTax;
+    const lineC160 = tax.gratuityTax;
+    const lineC170 = tax.grossTax;
+    const lineC180 = tax.totalCredits;
+    const lineC190 = tax.netTax;
+
+    // Slab breakdown rows
+    const slabRows = tax.breakdown.length===0
+      ? `<tr><td colspan="3" style="color:#34d399;padding-left:16px">No tax — taxable income within personal relief threshold</td></tr>`
+      : tax.breakdown.map(b=>`<tr><td style="padding-left:20px;color:#64748b;font-size:11px">${b.label}</td><td class="amt">${fmt(b.tax)}</td><td style="font-size:10px;color:#64748b">${(b.rate*100).toFixed(0)}% × ${fmt(b.chunk)}</td></tr>`).join("");
+
+    // WHT credits breakdown
+    const whtRows = [
+      tax.apitPaid>0          ? `<tr><td style="padding-left:16px">APIT Deducted at Source${tax.apitManual>0?" (Manual — T10 Total)":" (Auto-summed from payslip entries)"}</td><td class="amt">${fmt(tax.apitPaid)}</td><td style="font-size:10px;color:#64748b">${tax.apitFromEntries>0?`${tax.apitManual>0?"Manual":"Auto from "+((data.incomeEntries||[]).filter(e=>parseFloat(e.apitAmount)>0).length)+" payslip entries"}`:""}</td></tr>` : "",
+      (data.taxSettings?.whtInterestAIT||0)>0   ? `<tr><td style="padding-left:16px">AIT on FD Interest (${(cfg.aitRate*100).toFixed(0)}%)</td><td class="amt">${fmt(data.taxSettings.whtInterestAIT)}</td><td></td></tr>` : "",
+      (data.taxSettings?.whtDividendAIT||0)>0   ? `<tr><td style="padding-left:16px">AIT on Dividends (15%)</td><td class="amt">${fmt(data.taxSettings.whtDividendAIT)}</td><td></td></tr>` : "",
+      (data.taxSettings?.whtRentalAIT||0)>0     ? `<tr><td style="padding-left:16px">AIT on Rental Income (10%)</td><td class="amt">${fmt(data.taxSettings.whtRentalAIT)}</td><td></td></tr>` : "",
+      (data.taxSettings?.whtDirectorsFees||0)>0 ? `<tr><td style="padding-left:16px">WHT on Director's Fees (5%)</td><td class="amt">${fmt(data.taxSettings.whtDirectorsFees)}</td><td></td></tr>` : "",
+      (data.taxSettings?.whtFreelance||0)>0     ? `<tr><td style="padding-left:16px">WHT on Freelance/Contract Fees (5%)</td><td class="amt">${fmt(data.taxSettings.whtFreelance)}</td><td></td></tr>` : "",
+      (data.taxSettings?.whtRoyalties||0)>0     ? `<tr><td style="padding-left:16px">WHT on Royalties (10%)</td><td class="amt">${fmt(data.taxSettings.whtRoyalties)}</td><td></td></tr>` : "",
+      (data.taxSettings?.whtOther||0)>0         ? `<tr><td style="padding-left:16px">Other WHT/AIT at Source</td><td class="amt">${fmt(data.taxSettings.whtOther)}</td><td></td></tr>` : "",
+    ].filter(Boolean).join("");
+
+    // Business income computation (if manual entry used)
+    const businessSection = tax.hasManualBusiness ? `
+<div class="section">📊 SCHEDULE — Business Income Computation (s.3 IRA)</div>
+<table><thead><tr><th>Item</th><th style="text-align:right">Amount (Rs.)</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Gross Business Revenue / Turnover</td><td class="amt">${fmt(tax.bGross)}</td><td></td></tr>
+<tr><td style="padding-left:16px">Less: Allowable Business Expenses</td><td class="amt">(${fmt(tax.bAllow)})</td><td>Per IRA Sections 11–17</td></tr>
+<tr><td style="padding-left:16px">Add: Disallowable Expenses</td><td class="amt">${fmt(tax.bDisall)}</td><td>Entertainment >10%, private motor, excess depn</td></tr>
+<tr style="background:#f0fdf4"><td><b>Adjusted Business Profit / (Loss)</b></td><td class="amt"><b>${tax.businessNetProfit<0?"("+fmt(Math.abs(tax.businessNetProfit))+" — LOSS)":fmt(tax.businessNetProfit)}</b></td><td></td></tr>
+${tax.businessLossDeducted>0?`<tr><td style="padding-left:16px">Less: Prior Year Business Loss (s.35 IRA)</td><td class="amt">(${fmt(tax.businessLossDeducted)})</td><td>Cumulative c/f — up to 6 Y/A</td></tr>`:""}
+<tr style="background:#1a1a2e;color:#fff"><td><b>Assessable Business Income</b></td><td class="amt" style="color:#fbbf24"><b>${fmt(tax.businessAssessable)}</b></td><td></td></tr>
+${tax.currentYearBusinessLoss>0?`<tr><td colspan="3" style="color:#dc2626;font-weight:700;background:#fef2f2">⚠️ Current Year Business Loss: ${fmt(tax.currentYearBusinessLoss)} — carry forward under s.35 IRA (max 6 years)</td></tr>`:""}
+</tbody></table>` : "";
+
+    // Rental deduction schedule
+    const rentalSection = tax.grossRentalIncome>0 ? `
+<div class="section">🏠 SCHEDULE — Rental Income Deduction (s.18 IRA)</div>
+<table><thead><tr><th>Item</th><th style="text-align:right">Amount (Rs.)</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Gross Rental Income</td><td class="amt">${fmt(tax.grossRentalIncome)}</td><td></td></tr>
+<tr><td style="padding-left:16px">Less: ${tax.rentalMethod==="actual"?"Actual Maintenance/Repair/Depreciation":"Standard Deduction 25% (s.18 IRA)"}</td><td class="amt">(${fmt(tax.rentalDeduction)})</td><td>${tax.rentalMethod==="actual"?"Actual expenses claimed":"25% of gross rent — no proof required"}</td></tr>
+<tr style="background:#1a1a2e;color:#fff"><td><b>Net Assessable Rental Income</b></td><td class="amt" style="color:#fbbf24"><b>${fmt(tax.netRentalIncome)}</b></td><td></td></tr>
+</tbody></table>` : "";
+
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${APP_NAME} — AITR Tax Report ${activeYear}</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Georgia,serif;background:#fff;color:#1a1a2e;padding:24px}
 .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #b8960c;padding-bottom:16px;margin-bottom:20px}
 .logo-area{display:flex;gap:14px;align-items:center}.logo-area img{width:70px;height:70px;border-radius:50%;border:2px solid #b8960c}
 .firm{font-size:18px;font-weight:800;color:#1a1a2e}.sub{font-size:11px;color:#b8960c;font-weight:700;letter-spacing:1px;margin-top:2px}
-.badge{display:inline-block;background:${isFreelancer?"#f59e0b":"#1d4ed8"};color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;margin-top:6px}
 .app-brand{font-size:13px;color:#b8960c;font-weight:700;margin-bottom:2px}.app-tag{font-size:10px;color:#64748b}
 .profile-box{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:20px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .pf{font-size:12px;color:#374151}.pf span{color:#1a1a2e;font-weight:700}
 table{width:100%;border-collapse:collapse;margin-bottom:20px;font-size:12px}
 th{background:#1a1a2e;color:#fff;padding:9px 12px;text-align:left;font-size:11px;letter-spacing:0.5px}
 td{padding:8px 12px;border-bottom:1px solid #f1f5f9}tr:nth-child(even)td{background:#fafafa}
-.amt,.g,.r{text-align:right;font-weight:600}.g{color:#059669}.r{color:#dc2626}
+.amt{text-align:right;font-weight:600}
+.part-header{background:#1a1a2e;color:#f5d060;padding:10px 14px;font-size:13px;font-weight:800;letter-spacing:0.5px;margin-bottom:0;border-radius:8px 8px 0 0;margin-top:20px}
 .section{font-size:14px;font-weight:800;color:#1a1a2e;margin:20px 0 10px;padding-left:6px;border-left:4px solid #b8960c}
-.tax-box{background:linear-gradient(135deg,#1a1a2e,#2d2d5e);color:#fff;border-radius:12px;padding:18px;margin-bottom:20px}
-.tr{display:flex;justify-content:space-between;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.1)}
-.tr.total{font-size:16px;font-weight:800;border-top:2px solid #b8960c;margin-top:8px;padding-top:12px}
-.tl{color:#94a3b8}.tv{font-weight:700}.red{color:#f87171}.gold{color:#fbbf24}.green{color:#34d399}.amber{color:#fbbf24}
+.line-no{display:inline-block;background:#e2e8f0;color:#374151;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;margin-right:6px}
+.subtotal-row td{background:#f1f5f9!important;font-weight:700}
+.total-row td{background:#1a1a2e!important;color:#f5d060!important;font-weight:800;font-size:13px}
+.total-row .amt{color:#fbbf24!important}
+.tax-payable-row td{background:#7f1d1d!important;color:#fff!important;font-weight:800;font-size:14px}
+.tax-payable-row .amt{color:#fca5a5!important}
+.refund-row td{background:#14532d!important;color:#fff!important;font-weight:800;font-size:14px}
+.refund-row .amt{color:#86efac!important}
+.green{color:#059669;font-weight:600}.red{color:#dc2626;font-weight:600}
 .free-box{background:#d1fae5;border:2px solid #10b981;border-radius:10px;padding:14px;margin-bottom:20px;text-align:center}
 .free-box h3{color:#065f46;font-size:16px;margin-bottom:6px}.free-box p{color:#047857;font-size:12px}
 .disclaimer{background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:12px;font-size:11px;color:#78350f;margin-bottom:20px}
 .footer{margin-top:30px;border-top:2px solid #b8960c;padding-top:16px;display:flex;justify-content:space-between;font-size:10px;color:#94a3b8}
+.prov-note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;font-size:11px;color:#1e40af;margin-bottom:16px}
 @media print{body{padding:0}button{display:none}}</style></head><body>
+
 <div class="header">
   <div class="logo-area">
     <img src="${LOGO_B64}" alt="GDP Consultants"/>
-    <div><div class="app-brand">${APP_NAME}</div><div class="app-tag">${APP_BRAND_LINE}</div><div class="firm" style="margin-top:4px">${FIRM_NAME}</div>
+    <div><div class="app-brand">${APP_NAME}</div><div class="app-tag">${APP_BRAND_LINE}</div>
+    <div class="firm" style="margin-top:4px">${FIRM_NAME}</div>
     <div style="font-size:11px;color:#555;margin-top:4px">✉ ${APP_EMAIL} · 🌐 ${APP_WEB} · 💬 ${APP_WHATSAPP}</div></div>
   </div>
   <div>
-    <div style="font-size:20px;font-weight:800;color:#b8960c">Tax Report</div>
-    <div style="font-size:13px;color:#64748b">Y/A ${TAX_YEAR} · ${TAX_YEAR_FULL}</div>
-    <div style="font-size:11px;color:#555;margin-top:4px">Generated: ${new Date().toLocaleDateString("en-LK")}</div>
+    <div style="font-size:18px;font-weight:800;color:#b8960c">Annual Income Tax Return</div>
+    <div style="font-size:12px;color:#64748b;margin-top:2px">Assessment Year: <b>${activeYear}</b></div>
+    <div style="font-size:11px;color:#64748b">${yrPeriod}</div>
+    <div style="font-size:11px;color:#555;margin-top:4px">Filing Deadline: <b>${filingDL}</b> · Generated: ${new Date().toLocaleDateString("en-LK")}</div>
+    <div style="font-size:10px;color:#94a3b8;margin-top:2px">Portal: ${IRD_PORTAL}</div>
   </div>
 </div>
-<div class="free-box"><h3>🎁 FREE Tax Return Filing Included!</h3><p>As a premium subscriber, GDP Consultants will file your tax return at no additional cost.<br>Contact us: ${APP_EMAIL} · WhatsApp: ${APP_WHATSAPP}</p></div>
+
+<div class="free-box"><h3>🎁 FREE Tax Return Filing Included!</h3><p>As a GDP Consultants subscriber, we file your IRD return at no extra cost.<br>Contact us: ${APP_EMAIL} · WhatsApp: ${APP_WHATSAPP}</p></div>
+
 ${profile?`<div class="profile-box">
   <div class="pf">Name: <span>${profile.name}</span></div>
-  <div class="pf">Mobile: <span>${profile.mobile}</span></div>
   <div class="pf">NIC: <span>${profile.nic||"—"}</span></div>
   <div class="pf">TIN: <span>${profile.tin||"—"}</span></div>
+  <div class="pf">Mobile: <span>${profile.mobile}</span></div>
   <div class="pf">Address: <span>${[profile.address1,profile.address2,profile.city,profile.district].filter(Boolean).join(", ")||"—"}</span></div>
-  <div class="pf">Bank: <span>${profile.bankName||"—"} · ****${profile.accountNo?.slice(-4)||""}</span></div>
-  <div class="pf">Employment: <span class="badge">${isFreelancer?"💻 Freelancer":"🏢 Salaried Employee"}</span></div>
+  <div class="pf">Residency: <span>${data.taxSettings?.residency?.replace(/_/g," ")||"Resident Citizen"}</span></div>
+  <div class="pf">Employment: <span>${isFreelancer?"💻 Freelancer / Self-Employed":"🏢 Salaried Employee"}</span></div>
+  <div class="pf">Act: <span style="font-size:10px">${actName}</span></div>
 </div>`:""}
-<div class="disclaimer">⚠️ <b>Disclaimer:</b> Verify all figures with your GDP Consultants tax advisor before IRD submission.</div>
-<div class="section">💰 Income Summary</div>
-<table><thead><tr><th>Income Type</th><th style="text-align:right">Amount (Rs.)</th></tr></thead><tbody>${incRows}<tr style="background:#1a1a2e;color:#fff"><td><b>TOTAL GROSS INCOME</b></td><td class="amt" style="color:#fbbf24"><b>${fmt(tax.totalGross)}</b></td></tr></tbody></table>
-${isFreelancer&&Object.keys(tax.expenseBreakdown).length>0?`<div class="section">🧾 Business Expense Deductions (Freelancer)</div>
-<table><thead><tr><th>Expense Category</th><th style="text-align:right">Amount (Rs.)</th></tr></thead><tbody>${expRows}<tr style="background:#1a1a2e;color:#fff"><td><b>TOTAL ALLOWABLE EXPENSES</b></td><td class="amt" style="color:#34d399"><b>(${fmt(tax.allowableExpenses)})</b></td></tr></tbody></table>`:""}
-<div class="section">🧮 Tax Computation</div>
-<div class="tax-box">
-  <div class="tr"><span class="tl">Total Gross Income</span><span class="tv">${fmt(tax.totalGross)}</span></div>
-  ${isFreelancer?`<div class="tr"><span class="tl">Less: Business Expenses</span><span class="tv green">(${fmt(tax.allowableExpenses)})</span></div>`:""}
-  ${tax.exportIncome>0?`<div class="tr"><span class="tl">Less: Export Income</span><span class="tv amber">(${fmt(tax.exportIncome)})</span></div>`:""}
-  <div class="tr"><span class="tl">Less: Personal Relief</span><span class="tv green">(${fmt(tax.relief)})</span></div>
-  <div class="tr"><span class="tl">Less: Qualifying Payments</span><span class="tv green">(${fmt(tax.qpRelief)})</span></div>
-  <div class="tr"><span class="tl">Taxable Income</span><span class="tv gold">${fmt(tax.taxable)}</span></div>
-  <div class="tr"><span class="tl">Gross Tax Liability</span><span class="tv red">${fmt(tax.grossTax)}</span></div>
-  ${!isFreelancer?`<div class="tr"><span class="tl">Less: APIT Paid</span><span class="tv green">(${fmt(tax.apitPaid)})</span></div>`:""}
-  ${isFreelancer&&tax.quarterlyTax>0?`<div class="tr"><span class="tl">Quarterly Advance Tax</span><span class="tv amber">${fmt(tax.quarterlyTax)}/quarter</span></div>`:""}
-  <div class="tr total"><span class="tl">BALANCE TAX PAYABLE</span><span class="tv ${tax.netTax>0?"red":"green"}">${fmt(tax.netTax)}</span></div>
-</div>
-<div class="section">📅 Monthly Cash Flow</div>
-<table><thead><tr><th>Month</th><th style="text-align:right">Inflows</th><th style="text-align:right">Outflows</th><th style="text-align:right">Net</th></tr></thead><tbody>${mRows||"<tr><td colspan='4' style='text-align:center;color:#94a3b8'>No transactions</td></tr>"}</tbody></table>
-<div class="section">🏦 Bank Accounts</div>
-<table><thead><tr><th>Account</th><th>Bank</th><th style="text-align:right">Balance</th></tr></thead><tbody>
-${data.bankAccounts.map(a=>`<tr><td>${a.name} (${a.accountType})</td><td>${a.bank}</td><td class="${bankBalance(a)>=0?"g":"r"}">${fmt(bankBalance(a))}</td></tr>`).join("")||"<tr><td colspan='3'>No bank accounts</td></tr>"}
+
+<div class="disclaimer">⚠️ <b>Disclaimer:</b> This report is prepared from data entered in ${APP_NAME}. Verify all figures with your GDP Consultants Chartered Accountant before IRD submission. Figures are in Sri Lankan Rupees (Rs.).</div>
+
+${(activeYear==="2026/2027")?`<div class="prov-note">⚠️ <b>Provisional Year:</b> Y/A 2026/2027 rates are based on Act No.02/2025. Verify final rates at <a href="https://www.ird.gov.lk">ird.gov.lk</a> before filing.</div>`:""}
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- PART A — GROSS INCOME                                            -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<div class="part-header">PART A — GROSS INCOME (Assessable Income)</div>
+<table>
+  <thead><tr><th>Income Source</th><th style="text-align:right">Amount (Rs.)</th><th>Reference</th></tr></thead>
+  <tbody>
+    <tr><td><span class="line-no">A10</span><b>Employment Income</b></td><td class="amt">${fmt(lineA10)}</td><td style="font-size:10px;color:#64748b">s.2 IRA</td></tr>
+    ${Object.entries(tax.incByCat).filter(([c])=>employmentCats.includes(c)&&tax.incByCat[c]>0).map(([c,a])=>`<tr><td style="padding-left:20px;font-size:11px">${c}</td><td class="amt" style="font-size:11px">${fmt(a)}</td><td></td></tr>`).join("")}
+    <tr><td><span class="line-no">A20</span><b>Business / Professional Income</b></td><td class="amt">${fmt(lineA20)}</td><td style="font-size:10px;color:#64748b">s.3 IRA</td></tr>
+    ${Object.entries(tax.incByCat).filter(([c])=>businessCats.includes(c)&&tax.incByCat[c]>0).map(([c,a])=>`<tr><td style="padding-left:20px;font-size:11px">${c}</td><td class="amt" style="font-size:11px">${fmt(a)}</td><td></td></tr>`).join("")}
+    ${tax.hasManualBusiness?`<tr><td style="padding-left:20px;font-size:11px">Business Income (Manual P&L — net assessable)</td><td class="amt" style="font-size:11px">${fmt(tax.businessAssessable)}</td><td style="font-size:10px;color:#64748b">Per Schedule</td></tr>`:""}
+    <tr><td><span class="line-no">A30</span><b>Investment Income</b></td><td class="amt">${fmt(lineA30)}</td><td style="font-size:10px;color:#64748b">s.4 IRA</td></tr>
+    ${Object.entries(tax.incByCatRaw||tax.incByCat).filter(([c])=>investmentCats.includes(c)&&(tax.incByCatRaw||tax.incByCat)[c]>0).map(([c,a])=>`<tr><td style="padding-left:20px;font-size:11px">${c}${c==="Rental Income"&&tax.rentalDeduction>0?" (gross)":""}</td><td class="amt" style="font-size:11px">${fmt(a)}</td><td></td></tr>`).join("")}
+    <tr><td><span class="line-no">A40</span><b>Other Income</b></td><td class="amt">${fmt(lineA40)}</td><td style="font-size:10px;color:#64748b">s.6 IRA</td></tr>
+    ${Object.entries(tax.incByCat).filter(([c])=>otherCats.includes(c)&&tax.incByCat[c]>0).map(([c,a])=>`<tr><td style="padding-left:20px;font-size:11px">${c}</td><td class="amt" style="font-size:11px">${fmt(a)}</td><td></td></tr>`).join("")}
+    <tr><td><span class="line-no">A50</span><b>Exempt / Special Rate Income</b></td><td class="amt">${fmt(lineA50)}</td><td style="font-size:10px;color:#64748b">s.40, s.59 IRA</td></tr>
+    ${Object.entries(tax.incByCat).filter(([c])=>specialCats.includes(c)&&tax.incByCat[c]>0).map(([c,a])=>`<tr><td style="padding-left:20px;font-size:11px">${c}</td><td class="amt" style="font-size:11px">${fmt(a)}</td><td></td></tr>`).join("")}
+    <tr class="total-row"><td><b>TOTAL ASSESSABLE INCOME (A10+A20+A30+A40)</b></td><td class="amt">${fmt(lineA10+lineA20+lineA30+lineA40)}</td><td></td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- PART B — RELIEFS & DEDUCTIONS                                    -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<div class="part-header">PART B — RELIEFS & DEDUCTIONS</div>
+<table>
+  <thead><tr><th>Relief / Deduction</th><th style="text-align:right">Amount (Rs.)</th><th>Reference</th></tr></thead>
+  <tbody>
+    ${lineB60>0?`<tr><td><span class="line-no">B60</span>Rental Income Deduction (${tax.rentalMethod==="actual"?"Actual Expenses":"25% Standard"})</td><td class="amt">${fmt(lineB60)}</td><td style="font-size:10px;color:#64748b">s.18 IRA</td></tr>`:""}
+    ${lineB70>0?`<tr><td><span class="line-no">B70</span>Qualifying Payments (Life insurance, EPF top-up, charity, solar investment)</td><td class="amt">${fmt(lineB70)}</td><td style="font-size:10px;color:#64748b">s.57 IRA — cap Rs.1,200,000</td></tr>`:""}
+    <tr><td><span class="line-no">B80</span>Personal Relief</td><td class="amt">${fmt(lineB80)}</td><td style="font-size:10px;color:#64748b">s.56 IRA — Rs.${(cfg.personalRelief/1e6).toFixed(1)}M for ${activeYear}</td></tr>
+    ${lineB90>0?`<tr><td><span class="line-no">B90</span>Prior Year Business Loss Deducted (s.35 IRA)</td><td class="amt">${fmt(lineB90)}</td><td style="font-size:10px;color:#64748b">s.35 IRA — max 6 Y/A</td></tr>`:""}
+    <tr class="total-row"><td><b>TOTAL RELIEFS & DEDUCTIONS (B60+B70+B80+B90)</b></td><td class="amt">${fmt(totalPartB)}</td><td></td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- PART C — TAX COMPUTATION                                         -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<div class="part-header">PART C — TAX COMPUTATION</div>
+<table>
+  <thead><tr><th>Line</th><th style="text-align:right">Amount (Rs.)</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><span class="line-no">C120</span><b>Taxable Income (A − B excluding special rate)</b></td><td class="amt"><b>${fmt(lineC120)}</b></td><td style="font-size:10px">Assessable − Reliefs</td></tr>
+    <tr><td colspan="3" style="padding:4px 12px;background:#f8fafc;font-size:11px;color:#374151"><b>Tax on Graduated Slabs (C130):</b></td></tr>
+    ${slabRows}
+    <tr class="subtotal-row"><td><span class="line-no">C130</span>Tax on Graduated Income (IIT)</td><td class="amt">${fmt(lineC130)}</td><td></td></tr>
+    ${lineC140>0?`<tr><td><span class="line-no">C140</span>Tax on Export / Foreign Income (${cfg.exportExempt?"EXEMPT for this Y/A":"15% flat"})</td><td class="amt">${fmt(lineC140)}</td><td style="font-size:10px">${cfg.exportExempt?"s.9(1)(q) IRA":"Act No.02/2025"}</td></tr>`:""}
+    ${lineC150>0?`<tr><td><span class="line-no">C150</span>Capital Gains Tax (10% flat)</td><td class="amt">${fmt(lineC150)}</td><td style="font-size:10px">s.40 IRA</td></tr>`:""}
+    ${lineC160>0?`<tr><td><span class="line-no">C160</span>Gratuity / Terminal Benefits Tax</td><td class="amt">${fmt(lineC160)}</td><td style="font-size:10px">s.7 IRA — 0%/6%/12%</td></tr>`:""}
+    <tr class="total-row"><td><span class="line-no">C170</span><b>GROSS TAX LIABILITY</b></td><td class="amt"><b>${fmt(lineC170)}</b></td><td></td></tr>
+    <tr><td colspan="3" style="padding:4px 12px;background:#f0fdf4;font-size:11px;color:#166534"><b>WHT / AIT Credits (C180):</b></td></tr>
+    ${whtRows||`<tr><td style="padding-left:16px;color:#94a3b8">No WHT/AIT credits entered</td><td class="amt">—</td><td></td></tr>`}
+    <tr class="subtotal-row"><td><span class="line-no">C180</span>Total WHT / AIT Credits (creditable)</td><td class="amt green">(${fmt(lineC180)})</td><td style="font-size:10px;color:#059669">APIT + all WHT/AIT at source</td></tr>
+    ${lineC190>0
+      ? `<tr class="tax-payable-row"><td><span class="line-no">C190</span><b>BALANCE TAX PAYABLE</b></td><td class="amt"><b>${fmt(lineC190)}</b></td><td>Due by ${filingDL}</td></tr>`
+      : `<tr class="refund-row"><td><span class="line-no">C190</span><b>TAX OVERPAID / REFUND DUE</b></td><td class="amt"><b>(${fmt(Math.abs(lineC190))})</b></td><td>Apply to IRD for refund</td></tr>`
+    }
+  </tbody>
+</table>
+
+${businessSection}
+${rentalSection}
+
+<!-- ═══ Key Filing Information ════════════════════════════════════ -->
+<div class="section">📅 Key Filing Information — Y/A ${activeYear}</div>
+<table><thead><tr><th>Item</th><th>Details</th></tr></thead><tbody>
+<tr><td>Filing Deadline</td><td><b>${filingDL}</b></td></tr>
+<tr><td>IRD e-Filing Portal</td><td><a href="${IRD_PORTAL}">${IRD_PORTAL}</a></td></tr>
+<tr><td>Governing Act</td><td style="font-size:11px">${actName}</td></tr>
+<tr><td>Mandatory Filing Threshold (${activeYear})</td><td>${fmt(cfg.filingThreshold)}</td></tr>
+<tr><td>Personal Relief Applied (${activeYear})</td><td>${fmt(cfg.personalRelief)}</td></tr>
+<tr><td>AIT Rate on FD Interest (${activeYear})</td><td>${(cfg.aitRate*100).toFixed(0)}%</td></tr>
+<tr><td>APIT Monthly Threshold (${activeYear})</td><td>Rs.${(cfg.apitMonthlyThreshold/1000).toFixed(0)},000/month</td></tr>
+<tr><td>Export/Foreign Income Treatment</td><td>${cfg.exportExempt?"✅ EXEMPT under s.9(1)(q) IRA for this Y/A":"15% flat rate (Act No.02/2025 effective 01.04.2025)"}</td></tr>
 </tbody></table>
-<div class="footer"><div>${APP_NAME} v4.0 · ${FIRM_NAME}<br>Act: Inland Revenue (Amendment) Act No. 2 of 2025</div><div style="text-align:right">Filing Deadline: ${FILING_DEADLINE}<br>Portal: ${IRD_PORTAL}</div></div>
-<div style="text-align:center;margin-top:16px"><button onclick="window.print()" style="background:#1a1a2e;color:#f5d060;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button></div>
+
+<div class="footer">
+  <div>${APP_NAME} v4.0 · ${FIRM_NAME}<br>Prepared for Y/A ${activeYear} · ${actName}</div>
+  <div style="text-align:right">Filing Deadline: ${filingDL}<br>Portal: ${IRD_PORTAL}</div>
+</div>
+<div style="text-align:center;margin-top:16px">
+  <button onclick="window.print()" style="background:#1a1a2e;color:#f5d060;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button>
+</div>
 </body></html>`;
     const blob = new Blob([html], {type:"text/html;charset=utf-8"});
     const url = URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url;
-    a.download=`${APP_NAME}_TaxReport_${TAX_YEAR.replace("/","_")}_${(profile?.name||"Taxpayer").replace(/ /g,"_")}.html`;
+    a.download=`${APP_NAME}_AITR_${(activeYear||TAX_YEAR).replace("/","_")}_${(profile?.name||"Taxpayer").replace(/ /g,"_")}.html`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
     setTimeout(()=>setDownloading(false),1000);
@@ -3444,308 +3836,529 @@ ${data.bankAccounts.map(a=>`<tr><td>${a.name} (${a.accountType})</td><td>${a.ban
 }
 
 // ─── PAYSLIP SCANNER ────────────────────────────────────────────────────────────
-// Uses Tesseract.js (loaded from CDN) for OCR on captured payslip image
-function PayslipScanner({onExtracted,onClose}){
-  const [imgSrc,setImgSrc]     = useState(null);
-  const [status,setStatus]     = useState("idle"); // idle|loading|done|error
-  const [extracted,setExtracted] = useState({gross:"",apit:"",epf:"",etf:"",month:today().slice(0,7)});
-  const [tesseractReady,setTesseractReady] = useState(!!window.Tesseract);
-  const fileRef = useRef(null);
+// ─── PAYSLIP SCANNER — Claude AI Vision (replaces broken Tesseract CDN) ────────
+// Sends image/PDF to Claude claude-sonnet-4-20250514 via Anthropic API.
+// Works with: camera photos, uploaded JPG/PNG/PDF/screenshot — any format.
+// No external OCR CDN needed. Falls back to manual entry on API error.
+function PayslipScanner({onExtracted, onClose}) {
+  const [imgSrc,   setImgSrc]   = useState(null);   // base64 data URL preview
+  const [imgB64,   setImgB64]   = useState(null);   // pure base64 for API
+  const [imgMime,  setImgMime]  = useState("image/jpeg");
+  const [isPdf,    setIsPdf]    = useState(false);
+  const [status,   setStatus]   = useState("idle"); // idle|loading|done|error
+  const [errMsg,   setErrMsg]   = useState("");
+  const [extracted,setExtracted]= useState({gross:"",apit:"",epf:"",etf:"",month:today().slice(0,7)});
+  const cameraRef = useRef(null);
+  const uploadRef = useRef(null);
 
-  // Dynamically load Tesseract.js from CDN if not already present
-  useEffect(()=>{
-    if(window.Tesseract){ setTesseractReady(true); return; }
-    const s=document.createElement("script");
-    s.src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js";
-    s.onload=()=>setTesseractReady(true);
-    s.onerror=()=>setStatus("error");
-    document.head.appendChild(s);
-  },[]);
-
-  const extractNumbers = (text) => {
-    // Normalise: remove commas, convert to lowercase
-    const t = text.replace(/,/g,"").toLowerCase();
-    const findAmt = (patterns) => {
-      for(const pat of patterns){
-        const m = t.match(pat);
-        if(m) return parseFloat(m[1]).toFixed(2);
-      }
-      return "";
-    };
-    return {
-      gross: findAmt([/(?:gross\s*(?:salary|pay|earnings?|total)[^0-9]*)([\d]+(?:\.\d+)?)/i,/(?:basic\s*salary[^0-9]*)([\d]+(?:\.\d+)?)/i,/(?:total\s*earnings?[^0-9]*)([\d]+(?:\.\d+)?)/i]),
-      apit:  findAmt([/(?:apit|paye|income\s*tax)[^0-9]*([\d]+(?:\.\d+)?)/i,/(?:tax\s*deducted?[^0-9]*)([\d]+(?:\.\d+)?)/i]),
-      epf:   findAmt([/(?:epf\s*employee|employee\s*epf|epf\s*\(e\)|epf\s*contribution)[^0-9]*([\d]+(?:\.\d+)?)/i,/(?:epf)[^0-9]*([\d]+(?:\.\d+)?)/i]),
-      etf:   findAmt([/(?:etf)[^0-9]*([\d]+(?:\.\d+)?)/i]),
-    };
-  };
-
-  const handleFile = async(e)=>{
-    const file=e.target.files[0];
-    if(!file) return;
-    const reader=new FileReader();
-    reader.onload=async(ev)=>{
-      const src=ev.target.result;
-      setImgSrc(src);
-      setStatus("loading");
-      try{
-        if(!window.Tesseract) throw new Error("OCR not loaded");
-        const worker=await window.Tesseract.createWorker("eng");
-        const {data:{text}}=await worker.recognize(src);
-        await worker.terminate();
-        const result=extractNumbers(text);
-        setExtracted(prev=>({...prev,...result}));
-        setStatus("done");
-      } catch(err){
-        setStatus("error");
-      }
+  // ── File ingestion ──────────────────────────────────────────────────────────
+  const ingestFile = (file) => {
+    if (!file) return;
+    const mime = file.type || "image/jpeg";
+    const pdfFile = mime === "application/pdf" || file.name?.toLowerCase().endsWith(".pdf");
+    setIsPdf(pdfFile);
+    setImgMime(pdfFile ? "application/pdf" : mime);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target.result;
+      const b64 = dataUrl.split(",")[1];
+      if (!pdfFile) setImgSrc(dataUrl);   // preview image only (not PDF)
+      setImgB64(b64);
+      await runExtraction(b64, pdfFile ? "application/pdf" : mime);
     };
     reader.readAsDataURL(file);
   };
 
-  const set=p=>setExtracted(e=>({...e,...p}));
+  // ── Claude AI Vision extraction ─────────────────────────────────────────────
+  const runExtraction = async (b64, mime) => {
+    setStatus("loading");
+    setErrMsg("");
+    try {
+      const contentBlock = mime === "application/pdf"
+        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+        : { type: "image",    source: { type: "base64", media_type: mime,               data: b64 } };
 
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:9999,display:"flex",flexDirection:"column",overflowY:"auto"}}>
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 400,
+          system: `You are a Sri Lankan payslip data extractor.
+Extract ONLY these four numbers from the payslip image/document.
+Respond with ONLY valid JSON — no explanation, no markdown, no backticks.
+JSON format: {"gross":"","apit":"","epf":"","etf":""}
+Rules:
+- gross = Gross Salary / Gross Remuneration / Total Earnings / Basic Salary (before deductions). Use the TOTAL gross figure.
+- apit  = APIT / PAYE / Income Tax deducted (employee portion). 0 if not shown.
+- epf   = EPF Employee Contribution (8% of basic). 0 if not shown.
+- etf   = ETF contribution amount. 0 if not shown.
+- All values as plain numbers with 2 decimal places e.g. "125000.00"
+- If a field is not found or unclear, use ""
+- Do NOT include Rs. or commas in values.`,
+          messages: [{ role: "user", content: [contentBlock, { type: "text", text: "Extract the payslip figures as JSON." }] }],
+        }),
+      });
+
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error?.message || `API error ${res.status}`);
+      }
+
+      const data = await res.json();
+      const rawText = (data.content || []).map(b => b.text || "").join("").trim();
+      // Strip any accidental markdown fences
+      const clean = rawText.replace(/```json|```/gi, "").trim();
+      const parsed = JSON.parse(clean);
+      setExtracted(prev => ({
+        ...prev,
+        gross: parsed.gross || "",
+        apit:  parsed.apit  || "",
+        epf:   parsed.epf   || "",
+        etf:   parsed.etf   || "",
+      }));
+      setStatus("done");
+    } catch (err) {
+      console.error("PayslipScanner error:", err);
+      setErrMsg(err.message || "Extraction failed");
+      setStatus("error");
+    }
+  };
+
+  const set = p => setExtracted(e => ({ ...e, ...p }));
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:9999,display:"flex",flexDirection:"column",overflowY:"auto"}}>
       <div style={{background:"#0d1829",borderRadius:"20px 20px 0 0",marginTop:"auto",padding:20,maxHeight:"95vh",overflowY:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div style={{fontSize:15,fontWeight:"800",color:"#f1f5f9"}}>📸 Payslip Scanner</div>
+
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:"800",color:"#f1f5f9"}}>📸 Payslip Scanner</div>
+            <div style={{fontSize:10,color:"#10b981",marginTop:2}}>✨ Powered by Claude AI Vision — works on photos, PDFs &amp; screenshots</div>
+          </div>
           <button onClick={onClose} style={{background:"#1e293b",border:"none",color:"#94a3b8",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontWeight:"700"}}>✕ Close</button>
         </div>
 
         <div style={{fontSize:11,color:"#64748b",marginBottom:14,lineHeight:1.7}}>
-          Take a photo or upload your payslip. The scanner will automatically extract your gross salary, APIT, EPF, and ETF amounts.
+          Take a photo of your payslip, upload an image, or upload a PDF. Claude AI reads the gross salary, APIT, EPF, and ETF automatically. Works with any Sri Lankan payslip format.
         </div>
 
-        {/* Camera / File Picker */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
-          <button onClick={()=>{const i=fileRef.current;i.setAttribute("capture","environment");i.click();}}
-            style={{padding:"14px",background:"#064e3b",border:"2px solid #10b981",borderRadius:12,color:"#6ee7b7",fontWeight:"800",fontSize:13,cursor:"pointer"}}>
-            📷 Take Photo
-          </button>
-          <button onClick={()=>{fileRef.current.removeAttribute("capture");fileRef.current.click();}}
-            style={{padding:"14px",background:"#0a1a3a",border:"2px solid #1d4ed8",borderRadius:12,color:"#93c5fd",fontWeight:"800",fontSize:13,cursor:"pointer"}}>
-            🖼️ Upload Image
-          </button>
-        </div>
-        <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile}/>
+        {/* Upload / Camera buttons */}
+        {status !== "loading" && (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+            <button onClick={() => { cameraRef.current.setAttribute("capture","environment"); cameraRef.current.click(); }}
+              style={{padding:"12px 6px",background:"#064e3b",border:"2px solid #10b981",borderRadius:12,color:"#6ee7b7",fontWeight:"800",fontSize:12,cursor:"pointer",textAlign:"center"}}>
+              📷<br/>Camera
+            </button>
+            <button onClick={() => { uploadRef.current.removeAttribute("capture"); uploadRef.current.click(); }}
+              style={{padding:"12px 6px",background:"#0a1a3a",border:"2px solid #1d4ed8",borderRadius:12,color:"#93c5fd",fontWeight:"800",fontSize:12,cursor:"pointer",textAlign:"center"}}>
+              🖼️<br/>Image
+            </button>
+            <button onClick={() => { const i=document.createElement("input"); i.type="file"; i.accept="application/pdf"; i.onchange=e=>ingestFile(e.target.files[0]); i.click(); }}
+              style={{padding:"12px 6px",background:"#1a0a2e",border:"2px solid #7c3aed",borderRadius:12,color:"#c4b5fd",fontWeight:"800",fontSize:12,cursor:"pointer",textAlign:"center"}}>
+              📄<br/>PDF
+            </button>
+          </div>
+        )}
 
-        {imgSrc&&(
+        {/* Hidden file inputs */}
+        <input ref={cameraRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>ingestFile(e.target.files[0])}/>
+        <input ref={uploadRef} type="file" accept="image/*,.pdf,application/pdf" style={{display:"none"}} onChange={e=>ingestFile(e.target.files[0])}/>
+
+        {/* Image preview */}
+        {imgSrc && !isPdf && (
           <div style={{marginBottom:14,borderRadius:12,overflow:"hidden",border:"1px solid #334155"}}>
-            <img src={imgSrc} alt="payslip" style={{width:"100%",maxHeight:200,objectFit:"contain",background:"#111"}}/>
+            <img src={imgSrc} alt="payslip" style={{width:"100%",maxHeight:180,objectFit:"contain",background:"#111"}}/>
+          </div>
+        )}
+        {isPdf && imgB64 && status !== "idle" && (
+          <div style={{marginBottom:14,background:"#1a0a2e",border:"1px solid #7c3aed",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#c4b5fd"}}>
+            📄 PDF uploaded — Claude AI is reading it directly.
           </div>
         )}
 
-        {status==="loading"&&(
-          <div style={{textAlign:"center",padding:20}}>
-            <div style={{fontSize:24,marginBottom:8}}>🔍</div>
-            <div style={{color:"#93c5fd",fontWeight:"700"}}>Reading payslip...</div>
-            <div style={{color:"#475569",fontSize:11,marginTop:4}}>OCR is running — this takes 10–20 seconds on mobile</div>
+        {/* Loading */}
+        {status === "loading" && (
+          <div style={{textAlign:"center",padding:24}}>
+            <div style={{fontSize:32,marginBottom:8}}>🤖</div>
+            <div style={{color:"#93c5fd",fontWeight:"700",fontSize:14}}>Claude AI is reading your payslip…</div>
+            <div style={{color:"#475569",fontSize:11,marginTop:6}}>Usually takes 3–8 seconds. Works on any payslip format.</div>
           </div>
         )}
 
-        {status==="error"&&(
+        {/* Error */}
+        {status === "error" && (
           <div style={{background:"#1a0000",border:"1px solid #ef4444",borderRadius:8,padding:12,marginBottom:12,fontSize:12,color:"#fca5a5"}}>
-            ⚠️ OCR could not be loaded or failed. Please enter values manually below, or ensure you have an internet connection for the OCR library.
+            ⚠️ AI extraction failed{errMsg ? `: ${errMsg}` : ""}.<br/>
+            <span style={{color:"#94a3b8"}}>Please enter your payslip values manually below.</span>
           </div>
         )}
 
-        {(status==="done"||status==="error")&&(
+        {/* Results + manual entry form */}
+        {(status === "done" || status === "error") && (
           <div>
-            <div style={{fontSize:11,color:status==="done"?"#34d399":"#f59e0b",fontWeight:"700",marginBottom:10}}>
-              {status==="done"?"✅ Values extracted — please verify before saving:":"✏️ Enter values manually:"}
+            <div style={{fontSize:11,fontWeight:"700",marginBottom:10,color:status==="done"?"#34d399":"#f59e0b"}}>
+              {status === "done" ? "✅ Values extracted — verify before saving:" : "✏️ Enter values manually:"}
             </div>
             <FI label="Month (YYYY-MM)" type="month" value={extracted.month} onChange={v=>set({month:v})}/>
-            <FI label="Gross Salary (Rs.)" type="number" value={extracted.gross} onChange={v=>set({gross:v})} placeholder="0.00"/>
-            <FI label="APIT Deducted (Rs.)" type="number" value={extracted.apit} onChange={v=>set({apit:v})} placeholder="0.00"/>
-            <FI label="Employee EPF (Rs.)" type="number" value={extracted.epf} onChange={v=>set({epf:v})} placeholder="0.00"/>
-            <FI label="ETF (Rs.)" type="number" value={extracted.etf} onChange={v=>set({etf:v})} placeholder="0.00"/>
-            <button onClick={()=>onExtracted(extracted)}
+            <FI label="Gross Salary / Remuneration (Rs.)" type="number" value={extracted.gross} onChange={v=>set({gross:v})} placeholder="0.00"/>
+            <FI label="APIT / Income Tax Deducted (Rs.)" type="number" value={extracted.apit}  onChange={v=>set({apit:v})}  placeholder="0.00"/>
+            <FI label="Employee EPF Contribution (Rs.)" type="number" value={extracted.epf}   onChange={v=>set({epf:v})}   placeholder="0.00"/>
+            <FI label="ETF Contribution (Rs.)" type="number" value={extracted.etf}   onChange={v=>set({etf:v})}   placeholder="0.00"/>
+            <button onClick={() => onExtracted(extracted)}
               disabled={!extracted.gross}
-              style={{width:"100%",padding:"13px",background:extracted.gross?"linear-gradient(135deg,#b8960c,#f5d060)":"#334155",color:extracted.gross?"#111":"#64748b",border:"none",borderRadius:12,fontWeight:"800",fontSize:14,cursor:extracted.gross?"pointer":"not-allowed",marginTop:8}}>
+              style={{width:"100%",padding:"13px",background:extracted.gross?"linear-gradient(135deg,#b8960c,#f5d060)":"#334155",
+                color:extracted.gross?"#111":"#64748b",border:"none",borderRadius:12,fontWeight:"800",fontSize:14,
+                cursor:extracted.gross?"pointer":"not-allowed",marginTop:8}}>
               ✓ Import to Income Ledger
             </button>
           </div>
         )}
 
-        {status==="idle"&&!tesseractReady&&(
-          <div style={{textAlign:"center",color:"#64748b",fontSize:12,padding:8}}>Loading OCR engine…</div>
+        {status === "idle" && (
+          <div style={{textAlign:"center",padding:"20px 0",color:"#334155",fontSize:12}}>
+            📷 Choose Camera, Image, or PDF above to begin
+          </div>
         )}
+
       </div>
     </div>
   );
 }
 
-// ─── BANK CSV IMPORT ────────────────────────────────────────────────────────────
-function BankImportModal({data,update,onClose}){
-  const [rows,setRows]     = useState([]);
-  const [mapped,setMapped] = useState([]);
-  const [step,setStep]     = useState("upload"); // upload|preview|done
-  const [bankHint,setBankHint] = useState("");
-  const fileRef=useRef(null);
+// ─── BANK STATEMENT IMPORT — CSV + auto-category detection ──────────────────
+// Supports: Sampath, Commercial Bank, People's, BOC, HNB, NSB, Seylan, NDB, NTB
+// Handles: separate Dr/Cr columns, single Amount+indicator column, multi-row headers
+function BankImportModal({data, update, onClose}) {
+  const [mapped,   setMapped]   = useState([]);
+  const [step,     setStep]     = useState("upload"); // upload|preview|done
+  const [bankHint, setBankHint] = useState("");
+  const [imported, setImported] = useState(0);
+  const [parseErr, setParseErr] = useState("");
+  const fileRef = useRef(null);
 
-  // Detect Sri Lankan bank CSV format and parse accordingly
-  const parseCSV=(text)=>{
-    const lines=text.split(/\r?\n/).filter(l=>l.trim());
-    if(!lines.length) return [];
-    // Find header line (contains Date or date-like columns)
-    let headerIdx=lines.findIndex(l=>/date/i.test(l));
-    if(headerIdx<0) headerIdx=0;
-    const header=lines[headerIdx].split(",").map(h=>h.trim().replace(/["']/g,"").toLowerCase());
+  // ── Smart category detection from transaction description ─────────────────
+  // Category is always blank — user picks in preview (no auto-detection)
+  const autoCategory = (_desc, _isIncome) => "";
 
-    // Detect bank by column names
-    let bank="Unknown";
-    if(header.some(h=>/sampath/i.test(h)||header.join(",").includes("sampath"))) bank="Sampath Bank";
-    else if(header.some(h=>/commercial/i.test(h))) bank="Commercial Bank";
-    else if(header.some(h=>/peoples/i.test(h)||h.includes("people"))) bank="People's Bank";
-    else if(header.some(h=>/boc/i.test(h)||h.includes("bank of ceylon"))) bank="Bank of Ceylon";
-    else if(header.some(h=>/hnb/i.test(h))) bank="HNB";
+  // ── Robust CSV parser ─────────────────────────────────────────────────────
+  const parseCSV = (text) => {
+    setParseErr("");
+    // Split lines; strip BOM if present
+    const allLines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+
+    // Find the REAL header line — must have "date" and at least one of amount/debit/credit
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(allLines.length, 15); i++) {
+      const low = allLines[i].toLowerCase();
+      if (/date/.test(low) && (/amount|debit|credit|dr|cr|withdrawal|deposit/.test(low))) {
+        headerIdx = i;
+        break;
+      }
+    }
+    if (headerIdx < 0) {
+      setParseErr("Could not find a header row with Date and Amount columns. Make sure you export as CSV (not Excel) from your bank portal.");
+      return [];
+    }
+
+    // Parse header
+    const header = allLines[headerIdx].split(",").map(h => h.trim().replace(/["']/g, "").toLowerCase());
+
+    // Detect bank name from header or preceding lines
+    const topText = allLines.slice(0, headerIdx + 1).join(" ").toLowerCase();
+    let bank = "";
+    if (/sampath/.test(topText))           bank = "Sampath Bank";
+    else if (/commercial/.test(topText))   bank = "Commercial Bank";
+    else if (/peoples|people's/.test(topText)) bank = "People's Bank";
+    else if (/\bboc\b|bank of ceylon/.test(topText)) bank = "Bank of Ceylon";
+    else if (/\bhnb\b|hatton/.test(topText)) bank = "HNB";
+    else if (/\bnsb\b|national saving/.test(topText)) bank = "NSB";
+    else if (/seylan/.test(topText))       bank = "Seylan Bank";
+    else if (/\bndb\b/.test(topText))      bank = "NDB Bank";
+    else if (/nations trust|\bntb\b/.test(topText)) bank = "Nations Trust Bank";
     setBankHint(bank);
 
-    // Column mapping (flexible — try common names)
-    const col=(names)=>{ const i=header.findIndex(h=>names.some(n=>h.includes(n))); return i>=0?i:-1; };
-    const dateCol  = col(["date"]);
-    const descCol  = col(["description","narration","particulars","details","reference"]);
-    const debitCol = col(["debit","dr","withdrawal","debit amount","amount dr"]);
-    const creditCol= col(["credit","cr","deposit","credit amount","amount cr"]);
-    const amtCol   = col(["amount","transaction amount"]);
-    const balCol   = col(["balance","running balance"]);
+    // Column index resolver — tries multiple name variants
+    const col = (...names) => {
+      const idx = header.findIndex(h => names.some(n => h.includes(n)));
+      return idx >= 0 ? idx : -1;
+    };
 
-    const parsed=[];
-    for(let i=headerIdx+1;i<lines.length;i++){
-      const cols=lines[i].split(",").map(c=>c.trim().replace(/["']/g,""));
-      if(cols.length<3) continue;
-      const rawDate=dateCol>=0?cols[dateCol]:"";
-      const desc=descCol>=0?cols[descCol]:"Transaction";
-      const debit=debitCol>=0?parseFloat(cols[debitCol])||0:0;
-      const credit=creditCol>=0?parseFloat(cols[creditCol])||0:0;
-      const amt=amtCol>=0?Math.abs(parseFloat(cols[amtCol]))||0:0;
+    const dateCol   = col("date");
+    const descCol   = col("description", "narration", "particulars", "details", "reference", "remark", "trans");
+    const debitCol  = col("debit", "dr", "withdrawal", "debit amount", "amount dr", "dr amount");
+    const creditCol = col("credit", "cr", "deposit", "credit amount", "amount cr", "cr amount");
+    const amtCol    = col("amount", "transaction amount", "trans amount"); // single-column fallback
+    const indCol    = col("type", "dr/cr", "indicator", "cr/dr");          // Dr/Cr indicator column
 
-      // Parse date (handle DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY)
-      let date=today();
-      if(rawDate){
-        const dp=rawDate.match(/(\d{1,4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,4})/);
-        if(dp){
-          const [,a,m,b]=dp;
-          if(a.length===4) date=`${a}-${m.padStart(2,"0")}-${b.padStart(2,"0")}`;
-          else date=`${b}-${m.padStart(2,"0")}-${a.padStart(2,"0")}`;
+    const parsed = [];
+
+    for (let i = headerIdx + 1; i < allLines.length; i++) {
+      const raw = allLines[i].trim();
+      if (!raw) continue;
+
+      // Split respecting quoted fields
+      const cols = raw.match(/(".*?"|[^,]+)(?=,|$)/g)?.map(c => c.replace(/^"|"$/g, "").trim()) ?? raw.split(",").map(c => c.trim());
+
+      const rawDate = dateCol >= 0 ? cols[dateCol] : "";
+      const desc    = descCol >= 0 ? (cols[descCol] || "").slice(0, 80) : "Transaction";
+
+      // Skip rows that look like totals/summaries
+      if (/^(total|balance b\/f|closing|opening|sub.?total)/i.test(desc.trim())) continue;
+      if (!rawDate && !desc.trim()) continue;
+
+      // Parse date — handles DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY, DD.MM.YYYY
+      let date = today();
+      if (rawDate) {
+        const dp = rawDate.match(/(\d{1,4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,4})/);
+        if (dp) {
+          const [, a, m, b] = dp;
+          if (a.length === 4) date = `${a}-${m.padStart(2,"0")}-${b.padStart(2,"0")}`;
+          else                date = `${b.length===4?b:"20"+b}-${m.padStart(2,"0")}-${a.padStart(2,"0")}`;
         }
       }
 
-      if(credit>0||amt>0){
-        parsed.push({date,description:desc.slice(0,60),amount:credit||amt,type:"income",medium:"bank",category:"Salary",accountId:data.bankAccounts[0]?.id||"",id:uid(),ref:""});
+      // Determine debit / credit amounts
+      const cleanNum = s => parseFloat((s||"").replace(/[,\s Rs.]/g, "")) || 0;
+      let debit  = debitCol  >= 0 ? cleanNum(cols[debitCol])  : 0;
+      let credit = creditCol >= 0 ? cleanNum(cols[creditCol]) : 0;
+
+      // Single-amount column with Dr/Cr indicator
+      if (amtCol >= 0 && debit === 0 && credit === 0) {
+        const amt = cleanNum(cols[amtCol]);
+        if (amt > 0) {
+          const ind = (indCol >= 0 ? cols[indCol] : "").toLowerCase();
+          if (/^dr|debit|withdrawal/.test(ind)) debit  = amt;
+          else                                   credit = amt; // default credit if unclear
+        }
       }
-      if(debit>0){
-        parsed.push({date,description:desc.slice(0,60),amount:debit,type:"expense",medium:"bank",category:"General Expense",accountId:data.bankAccounts[0]?.id||"",id:uid(),ref:""});
+
+      if (credit > 0) {
+        parsed.push({
+          id: uid(), date, description: desc || "Credit",
+          amount: credit, type: "income", medium: "bank",
+          category: autoCategory(desc, true),
+          accountId: data.bankAccounts[0]?.id || "",
+        });
+      }
+      if (debit > 0) {
+        parsed.push({
+          id: uid(), date, description: desc || "Debit",
+          amount: debit, type: "expense", medium: "bank",
+          category: autoCategory(desc, false),
+          accountId: data.bankAccounts[0]?.id || "",
+        });
       }
     }
-    return parsed.filter(p=>p.amount>0&&p.date);
+    return parsed;
   };
 
-  const handleFile=(e)=>{
-    const file=e.target.files[0];
-    if(!file) return;
-    const reader=new FileReader();
-    reader.onload=(ev)=>{
-      const parsed=parseCSV(ev.target.result);
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const parsed = parseCSV(ev.target.result);
       setMapped(parsed);
       setStep("preview");
     };
     reader.readAsText(file);
   };
 
-  const importAll=()=>{
-    const existing=new Set(data.transactions.map(t=>t.date+"|"+t.amount+"|"+t.description.slice(0,20)));
-    const newTxns=mapped.filter(t=>!existing.has(t.date+"|"+t.amount+"|"+t.description.slice(0,20)));
-    update({transactions:[...data.transactions,...newTxns]});
+  const updateRow = (i, patch) => setMapped(m => m.map((r, j) => j === i ? { ...r, ...patch } : r));
+
+  const uncategorised = mapped.filter(r => !r.category).length;
+
+  const importAll = () => {
+    if (uncategorised > 0) return;  // guard — button should already be disabled
+    const existing = new Set(data.transactions.map(t => `${t.date}|${t.amount}|${t.description.slice(0,20)}`));
+    const newTxns  = mapped.filter(t => !existing.has(`${t.date}|${t.amount}|${t.description.slice(0,20)}`));
+    update({ transactions: [...data.transactions, ...newTxns] });
+    setImported(newTxns.length);
     setStep("done");
-    setRows(newTxns);
   };
 
-  const updateRow=(i,patch)=>setMapped(m=>m.map((r,j)=>j===i?{...r,...patch}:r));
-
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:9999,display:"flex",flexDirection:"column",overflowY:"auto"}}>
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:9999,display:"flex",flexDirection:"column",overflowY:"auto"}}>
       <div style={{background:"#0d1829",borderRadius:"20px 20px 0 0",marginTop:"auto",padding:20,maxHeight:"95vh",overflowY:"auto"}}>
+
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <div style={{fontSize:15,fontWeight:"800",color:"#f1f5f9"}}>🏦 Import Bank Statement</div>
           <button onClick={onClose} style={{background:"#1e293b",border:"none",color:"#94a3b8",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontWeight:"700"}}>✕</button>
         </div>
 
-        {step==="upload"&&(
+        {step === "upload" && (
           <>
-            <div style={{fontSize:11,color:"#64748b",lineHeight:1.7,marginBottom:16}}>
-              Export your bank statement as CSV from your bank's internet banking portal, then upload it here. Supported: <span style={{color:"#93c5fd"}}>Sampath, Commercial, People's, BOC, HNB</span> and most CSV formats.
+            <div style={{fontSize:11,color:"#64748b",lineHeight:1.7,marginBottom:14}}>
+              Export your bank statement as <strong style={{color:"#93c5fd"}}>CSV</strong> from your internet banking portal, then upload here.
+              Supported banks: <span style={{color:"#93c5fd"}}>Sampath · Commercial · People's · BOC · HNB · NSB · Seylan · NDB · NTB</span>
             </div>
+
             <div style={{...S.card,border:"1px solid #1e3a5f",background:"#060d1a",marginBottom:12}}>
-              <div style={{fontSize:11,color:"#93c5fd",fontWeight:"700",marginBottom:8}}>How to export:</div>
-              {[["Sampath","Log in → Accounts → Statement → Export → CSV"],["Commercial","Log in → Account → Transaction History → Download → CSV"],["People's / BOC","Log in → eStatement → Date range → Export CSV"],["HNB","Log in → Accounts → Mini Statement → Download"]].map(([b,s])=>(
+              <div style={{fontSize:11,color:"#93c5fd",fontWeight:"700",marginBottom:8}}>📋 How to export CSV:</div>
+              {[
+                ["Sampath",     "Online Banking → Accounts → Statement → Export → CSV"],
+                ["Commercial",  "Online Banking → Account → Transaction History → Download CSV"],
+                ["People's/BOC","Internet Banking → eStatement → Date range → Export CSV"],
+                ["HNB",         "Online Banking → Accounts → Statement → Download → CSV"],
+                ["NSB",         "Online Banking → Account → Transaction History → CSV"],
+                ["Seylan",      "Online Banking → Accounts → Statement → Export CSV"],
+                ["NDB/NTB",     "Online Banking → Accounts → Download Statement → CSV format"],
+              ].map(([b,s]) => (
                 <div key={b} style={{padding:"4px 0",borderBottom:"1px solid #1e293b"}}>
                   <span style={{fontSize:11,color:"#b8960c",fontWeight:"700"}}>{b}: </span>
                   <span style={{fontSize:10,color:"#64748b"}}>{s}</span>
                 </div>
               ))}
             </div>
-            {data.bankAccounts.length===0&&<div style={{fontSize:11,color:"#f59e0b",background:"#1a1000",border:"1px solid #f59e0b",borderRadius:8,padding:10,marginBottom:12}}>⚠️ Add a bank account in your profile first so imported transactions can be linked to it.</div>}
-            <button onClick={()=>fileRef.current.click()} style={{width:"100%",padding:"14px",background:"linear-gradient(135deg,#1d4ed8,#2563eb)",border:"none",borderRadius:12,color:"#fff",fontWeight:"800",fontSize:14,cursor:"pointer"}}>
+
+            {data.bankAccounts.length === 0 && (
+              <div style={{fontSize:11,color:"#f59e0b",background:"#1a1000",border:"1px solid #f59e0b",borderRadius:8,padding:10,marginBottom:12}}>
+                ⚠️ Add a bank account in your Profile first so imported transactions can be linked to it.
+              </div>
+            )}
+
+            <button onClick={() => fileRef.current.click()}
+              style={{width:"100%",padding:"14px",background:"linear-gradient(135deg,#1d4ed8,#2563eb)",border:"none",borderRadius:12,color:"#fff",fontWeight:"800",fontSize:14,cursor:"pointer"}}>
               📂 Choose CSV File
             </button>
             <input ref={fileRef} type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={handleFile}/>
           </>
         )}
 
-        {step==="preview"&&mapped.length>0&&(
+        {step === "preview" && mapped.length > 0 && (
           <>
-            <div style={{fontSize:11,color:"#34d399",fontWeight:"700",marginBottom:4}}>✅ Found {mapped.length} transactions{bankHint?" from "+bankHint:""}</div>
-            <div style={{fontSize:10,color:"#64748b",marginBottom:12}}>Review, adjust categories if needed, then import. Duplicates will be skipped automatically.</div>
-            <div style={{maxHeight:280,overflowY:"auto",marginBottom:14,border:"1px solid #1e293b",borderRadius:8}}>
-              {mapped.map((r,i)=>(
-                <div key={r.id} style={{padding:"8px 10px",borderBottom:"1px solid #1e293b",background:r.type==="income"?"#021a0e":"#1a0505"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:11,color:"#e2e8f0",fontWeight:"600",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.description}</div>
-                      <div style={{fontSize:10,color:"#64748b"}}>{r.date}</div>
-                    </div>
-                    <div style={{flexShrink:0,textAlign:"right"}}>
-                      <div style={{fontSize:12,fontWeight:"700",color:r.type==="income"?"#34d399":"#f87171"}}>{r.type==="income"?"+":"-"}{fmt(r.amount)}</div>
-                      <select value={r.type} onChange={e=>updateRow(i,{type:e.target.value})}
-                        style={{fontSize:9,background:"#0f172a",color:"#94a3b8",border:"1px solid #334155",borderRadius:4,padding:"1px 4px",marginTop:2}}>
-                        <option value="income">Income</option>
-                        <option value="expense">Expense</option>
-                      </select>
-                    </div>
-                  </div>
-                  <select value={r.category} onChange={e=>updateRow(i,{category:e.target.value})}
-                    style={{width:"100%",marginTop:6,fontSize:10,background:"#0f172a",color:"#94a3b8",border:"1px solid #334155",borderRadius:4,padding:"3px 6px"}}>
-                    {(r.type==="income"?TXN_CATS_INCOME:TXN_CATS_EXPENSE).map(c=><option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              ))}
+            {/* Header: transaction count + progress */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:11,color:"#34d399",fontWeight:"700"}}>
+                ✅ Found {mapped.length} transactions{bankHint ? ` · ${bankHint}` : ""}
+              </div>
+              <div style={{fontSize:10,fontWeight:"700",color:uncategorised===0?"#34d399":"#f59e0b"}}>
+                {uncategorised===0 ? "✓ All categorised" : `${uncategorised} need category`}
+              </div>
             </div>
+
+            {/* Instruction banner */}
+            <div style={{background:"#1a1000",border:"1px solid #f59e0b44",borderRadius:8,padding:"8px 10px",marginBottom:10,fontSize:11,color:"#fbbf24",display:"flex",gap:8,alignItems:"flex-start"}}>
+              <span style={{flexShrink:0}}>📋</span>
+              <span>Select a <b>category</b> and verify <b>Income / Expense</b> for each row. Import is enabled only when all rows are categorised.</span>
+            </div>
+
+            {/* Transaction rows */}
+            <div style={{maxHeight:320,overflowY:"auto",marginBottom:12,border:"1px solid #1e293b",borderRadius:8}}>
+              {mapped.map((r, i) => {
+                const needsCat = !r.category;
+                return (
+                  <div key={r.id} style={{
+                    padding:"8px 10px",
+                    borderBottom:"1px solid #1e293b",
+                    background: needsCat ? "#1a1000" : r.type==="income" ? "#021a0e" : "#1a0505",
+                    borderLeft: needsCat ? "3px solid #f59e0b" : "3px solid transparent",
+                  }}>
+                    {/* Row top: description + amount + income/expense toggle */}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:5}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,color:"#e2e8f0",fontWeight:"600",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.description}</div>
+                        <div style={{fontSize:10,color:"#64748b"}}>{r.date}</div>
+                      </div>
+                      <div style={{flexShrink:0,textAlign:"right"}}>
+                        <div style={{fontSize:12,fontWeight:"700",color:r.type==="income"?"#34d399":"#f87171"}}>
+                          {r.type==="income"?"+":"-"}{fmt(r.amount)}
+                        </div>
+                        <select value={r.type} onChange={e=>updateRow(i,{type:e.target.value, category:""})}
+                          style={{fontSize:9,background:"#0f172a",color:"#94a3b8",border:"1px solid #334155",borderRadius:4,padding:"1px 4px",marginTop:2}}>
+                          <option value="income">Income</option>
+                          <option value="expense">Expense</option>
+                        </select>
+                      </div>
+                    </div>
+                    {/* Category picker */}
+                    <select value={r.category} onChange={e=>updateRow(i,{category:e.target.value})}
+                      style={{width:"100%",fontSize:10,borderRadius:5,padding:"4px 6px",
+                        background: needsCat ? "#261500" : "#0f172a",
+                        color:      needsCat ? "#f59e0b"  : "#94a3b8",
+                        border: `1px solid ${needsCat ? "#f59e0b" : "#334155"}`,
+                        fontWeight: needsCat ? "700" : "400",
+                      }}>
+                      <option value="" disabled>— Select category —</option>
+                      {(r.type==="income" ? TXN_CATS_INCOME : TXN_CATS_EXPENSE).map(c=>(
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Progress bar */}
+            {mapped.length > 0 && (
+              <div style={{marginBottom:10}}>
+                <div style={{height:4,background:"#1e293b",borderRadius:4,overflow:"hidden"}}>
+                  <div style={{height:"100%",borderRadius:4,
+                    background:"linear-gradient(90deg,#10b981,#34d399)",
+                    width:`${((mapped.length - uncategorised) / mapped.length * 100).toFixed(0)}%`,
+                    transition:"width 0.3s ease"
+                  }}/>
+                </div>
+                <div style={{fontSize:9,color:"#64748b",marginTop:3,textAlign:"right"}}>
+                  {mapped.length - uncategorised} / {mapped.length} categorised
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <button onClick={()=>setStep("upload")} style={{padding:"12px",background:"#1e293b",border:"1px solid #334155",borderRadius:10,color:"#94a3b8",fontWeight:"700",cursor:"pointer"}}>← Back</button>
-              <button onClick={importAll} style={{padding:"12px",background:"linear-gradient(135deg,#b8960c,#f5d060)",border:"none",borderRadius:10,color:"#111",fontWeight:"800",cursor:"pointer"}}>Import {mapped.length} Txns</button>
+              <button onClick={() => setStep("upload")}
+                style={{padding:"12px",background:"#1e293b",border:"1px solid #334155",borderRadius:10,color:"#94a3b8",fontWeight:"700",cursor:"pointer"}}>
+                ← Back
+              </button>
+              <button
+                onClick={importAll}
+                disabled={uncategorised > 0}
+                style={{padding:"12px",borderRadius:10,fontWeight:"800",fontSize:13,border:"none",
+                  cursor: uncategorised > 0 ? "not-allowed" : "pointer",
+                  background: uncategorised > 0
+                    ? "#1e293b"
+                    : "linear-gradient(135deg,#b8960c,#f5d060)",
+                  color: uncategorised > 0 ? "#475569" : "#111",
+                }}>
+                {uncategorised > 0 ? `${uncategorised} row${uncategorised>1?"s":""} need category` : `Import ${mapped.length} Txns ✓`}
+              </button>
             </div>
           </>
         )}
 
-        {step==="preview"&&mapped.length===0&&(
+        {step === "preview" && mapped.length === 0 && (
           <div style={{textAlign:"center",padding:30}}>
-            <div style={{fontSize:24}}>😕</div>
-            <div style={{color:"#f59e0b",fontWeight:"700",marginTop:8}}>No transactions found</div>
-            <div style={{fontSize:11,color:"#64748b",marginTop:4}}>The CSV format may not be recognised. Try exporting as "CSV" (not Excel) from your bank portal.</div>
-            <button onClick={()=>setStep("upload")} style={{marginTop:14,padding:"10px 20px",background:"#1e293b",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontWeight:"700",cursor:"pointer"}}>Try Again</button>
+            <div style={{fontSize:28,marginBottom:8}}>😕</div>
+            <div style={{color:"#f59e0b",fontWeight:"700"}}>No transactions found</div>
+            {parseErr
+              ? <div style={{fontSize:11,color:"#f87171",marginTop:8,lineHeight:1.6}}>{parseErr}</div>
+              : <div style={{fontSize:11,color:"#64748b",marginTop:4}}>The CSV format may not be recognised. Try exporting as "CSV" (not Excel) from your bank portal.</div>
+            }
+            <button onClick={() => { setStep("upload"); setParseErr(""); }}
+              style={{marginTop:14,padding:"10px 20px",background:"#1e293b",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontWeight:"700",cursor:"pointer"}}>
+              Try Again
+            </button>
           </div>
         )}
 
-        {step==="done"&&(
+        {step === "done" && (
           <div style={{textAlign:"center",padding:20}}>
             <div style={{fontSize:40,marginBottom:10}}>✅</div>
             <div style={{fontSize:16,fontWeight:"800",color:"#34d399",marginBottom:6}}>Import Complete!</div>
-            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>{rows.length} transactions added to your ledger.</div>
-            <button onClick={onClose} style={{padding:"12px 28px",background:"linear-gradient(135deg,#b8960c,#f5d060)",border:"none",borderRadius:12,color:"#111",fontWeight:"800",fontSize:14,cursor:"pointer"}}>Done</button>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:6}}>{imported} new transactions added to your Cash Book.</div>
+            {mapped.length - imported > 0 && (
+              <div style={{fontSize:11,color:"#f59e0b",marginBottom:16}}>{mapped.length - imported} duplicate(s) skipped.</div>
+            )}
+            <button onClick={onClose}
+              style={{padding:"12px 28px",background:"linear-gradient(135deg,#b8960c,#f5d060)",border:"none",borderRadius:12,color:"#111",fontWeight:"800",fontSize:14,cursor:"pointer"}}>
+              Done
+            </button>
           </div>
         )}
+
       </div>
     </div>
   );
